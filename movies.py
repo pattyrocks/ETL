@@ -2,70 +2,83 @@ import tmdbsimple as tmdb
 import os
 import duckdb
 import pandas as pd
+import time
+import numpy as np
 from datetime import date
 import calendar
+import requests
+
 
 tmdb.API_KEY = os.getenv('TMDBAPIKEY')
 
 con = duckdb.connect(database='tmdb',read_only=False)
 
-con.execute('''CREATE /*OR REPLACE*/ TABLE movies (
-    adult BOOLEAN,
-    backdrop_path VARCHAR,
-    genre_ids BIGINT[],
-    id VARCHAR PRIMARY KEY,
-    original_language VARCHAR,
-    original_title VARCHAR,
-    overview VARCHAR,
-    popularity INTEGER,
-    poster_path VARCHAR,
-    release_date DATE,
-    title VARCHAR,
-    video BOOLEAN,
-    vote_average FLOAT,
-    vote_count INTEGER        
-); ''')
+processed_count = 0
+skipped_ids = []
 
-def insert_into_movies():
+start_time = time.time()
 
-    discover = tmdb.Discover()
+def add_info_to_movies():
 
-    for year in range(1890,2026):
+    i = 1
 
-        for month in range(1,13):
-                start_date = date(year, month, 1)
-                end_date = date(year, month, calendar.monthrange(year, month)[1])
+    movies_ids = con.sql('''SELECT id FROM movies''').fetchdf()
 
-                response_pages = discover.movie(
-                    primary_release_date_gte=start_date.strftime('%Y-%m-%d'),
-                    primary_release_date_lte=end_date.strftime('%Y-%m-%d')
-                )
+    print("Starting movie data retrieval...\n")
 
-                print(start_date)
-                print(' ')
-                print(end_date)
+    for movie_id in movies_ids['id']:
+        try:
+            print(f"Attempting to fetch data for movie ID: {movie_id}")
 
-                for pg in range(1,response_pages['total_pages']+1):
+            dictionary = tmdb.Movies(movie_id).info()
 
-                    response = discover.movie(
-                        primary_release_date_gte=start_date.strftime('%Y-%m-%d'),
-                        primary_release_date_lte=end_date.strftime('%Y-%m-%d'),
-                        page=pg
-                    )
+            df = pd.DataFrame.from_dict(dictionary, orient='index')
+            df = df.transpose()
 
-                    result = response['results']
-                    df = pd.DataFrame(result)
+            df = df[['belongs_to_collection', 'budget', 'homepage', 'id',
+                 'origin_country', 'revenue', 'runtime', 'status',
+                 'production_countries']]
+            
+            con.execute('''UPDATE movies 
+                           SET
+                            belongs_to_collection = df.belongs_to_collection,
+                            budget = df.budget,
+                            homepage = df.homepage,
+                            origin_country = df.origin_country,
+                            revenue = df.revenue,
+                            runtime = df.runtime,
+                            status = df.status,
+                            production_countries = df.production_countries
+                           FROM df 
+                           WHERE df.id = movies.id''')
+            i += 1
 
-                    try:
-                        con.execute("INSERT OR IGNORE INTO movies SELECT * FROM df")
+            end_time = time.time()
+            elapsed_time = end_time - start_time
+            minutes = int(elapsed_time // 60) # Integer division for whole minutes
+            remaining_seconds = elapsed_time % 60 # Modulo for remaining seconds     
 
-                    except Exception as ex:
-                        print(f'An error occurred: {ex} on year {year} and month {month}, page {pg}')
-                        print(result)
+            print(f'I have inserted data to id {movie_id} and I have processed {i} registers in {minutes}m{remaining_seconds:.2f}s')
 
+        except requests.exceptions.HTTPError as e:
+            print(f"ERROR: HTTPError for ID {movie_id}: {e}")
+            skipped_ids.append(movie_id)
+            continue
 
-    final_table = con.sql("SELECT * FROM movies")
+        except KeyError as e:
+            print(f"ERROR: KeyError for ID {movie_id} - Missing data: {e}. DataFrame conversion might fail.")
+            skipped_ids.append(movie_id)
+            continue
 
-    print(final_table)
+        except Exception as e:
+            print(f"ERROR: An unexpected error occurred for ID {movie_id}: {e}")
+            skipped_ids.append(movie_id)
+            continue
+
+    print(f"\nProcessing complete.")
+    print(f"Successfully processed {processed_count} movies.")
+
+if skipped_ids:
+    print(f"Skipped IDs due to errors: {skipped_ids}")
 
     con.close()
