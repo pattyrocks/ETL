@@ -3,9 +3,6 @@ import os
 import duckdb
 import pandas as pd
 import time
-import numpy as np
-from datetime import date
-import calendar
 import requests
 
 
