@@ -7,7 +7,7 @@ import requests
 
 tmdb.API_KEY = os.getenv('TMDBAPIKEY')
 
-con = duckdb.connect(database='tmdb.duckdb', read_only=False)
+con = duckdb.connect(database='TMDB', read_only=False)
 
 con.execute('''
     CREATE TABLE IF NOT EXISTS tv_shows (
@@ -25,14 +25,6 @@ con.execute('''
     );
 ''')
 
-# You might want to initially populate the 'tv_shows' table with IDs
-# For example, by fetching popular or top-rated TV shows first.
-# Here's an example of how you might add a dummy ID for testing,
-# or if you have a separate script to populate initial IDs.
-# If your 'tv_shows' table is already populated with IDs, you can skip this.
-con.execute("INSERT OR IGNORE INTO tv_shows (id) VALUES (1399);") # Example: Game of Thrones ID
-# con.execute("INSERT OR IGNORE INTO tv_shows (id) VALUES (66732);") # Example: Stranger Things ID
-
 processed_count = 0
 skipped_ids = []
 start_time = time.time()
@@ -42,7 +34,7 @@ def add_info_to_tv_shows():
     Fetches detailed information for TV shows from TMDB and updates the
     'tv_shows' table in the DuckDB database.
     """
-    global processed_count # Declare as global to modify the outer variable
+    global processed_count
     
     # Fetch all TV show IDs from the 'tv_shows' table
     tv_show_ids_df = con.sql('''SELECT id FROM tv_shows''').fetchdf()
@@ -64,7 +56,7 @@ def add_info_to_tv_shows():
             df = pd.DataFrame.from_dict(tv_show_info, orient='index').transpose()
 
             # Select and rename columns to match the DuckDB table schema
-            # Note: 'production_countries' is a list of dicts, storing as string for simplicity
+            # Note: 'production_countries' is a list of dicts, storing as string
             # 'episode_run_time' is a list of ints, DuckDB can handle VARCHAR[]
             selected_df = df[[
                 'episode_run_time', 'homepage', 'id', 'in_production',
