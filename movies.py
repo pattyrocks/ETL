@@ -8,7 +8,7 @@ import requests
 
 tmdb.API_KEY = os.getenv('TMDBAPIKEY')
 
-con = duckdb.connect(database='tmdb',read_only=False)
+con = duckdb.connect(database='TMDB',read_only=False)
 
 processed_count = 0
 skipped_ids = []
@@ -74,6 +74,8 @@ def add_info_to_movies():
 
     print(f"\nProcessing complete.")
     print(f"Successfully processed {processed_count} movies.")
+
+add_info_to_movies()
 
 if skipped_ids:
     print(f"Skipped IDs due to errors: {skipped_ids}")
