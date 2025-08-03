@@ -58,7 +58,7 @@ def create_credits():
     print('Starting data retrieval of movie IDs from DuckDB...')
     # Consider only fetching IDs for movies that don't yet have cast data,
     # if you are resuming an interrupted process:
-    movies_ids_df = con.execute('''SELECT CAST(id AS STRING) AS id FROM movies WHERE id NOT IN (SELECT DISTINCT CAST(movie_id AS STRING) AS id FROM movie_cast)''').fetchdf()
+    movies_ids_df = con.execute('''SELECT id FROM movies WHERE id NOT IN (SELECT DISTINCT movie_id AS id FROM movie_cast)''').fetchdf()
     # movies_ids_df = con.execute('''SELECT id FROM movies LIMIT 100''').fetchdf()
     movie_ids_to_process = movies_ids_df['id'].tolist()
     total_movies_to_process = len(movie_ids_to_process)
