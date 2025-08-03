@@ -93,6 +93,7 @@ Build a lightweight, fully local ETL process to collect, clean, and store **all 
 
 ## 📈 Future Improvements
 
+- Add People (mainly actors) aggregated information
 - Normalize data into star schema (e.g. `dim_actor`, `dim_movie`, `dim_crew`, `dim_tv_show`) or OBT
 - Schedule runs with cron or Apache Airflow
 - Enrich with marts for genres, production companies, episode-level data
