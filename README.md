@@ -14,8 +14,8 @@ Build a lightweight, fully local ETL process to collect, clean, and store **all 
 
 | 📄 File                        | 📝 Description                                                                 |
 |-------------------------------|--------------------------------------------------------------------------------|
-| `movies.py`                   | Extracts all movies from TMDB API and saves them to the `movies` table.        |
 | `adding_movies_ids.py`         | Parallelized script to fetch and store all movie IDs from TMDB.                |
+| `movies.py`                   | Extracts data from TMDB API and saves them to the `movies` table.              |
 | `movie_cast.py`               | Extracts cast data for each movie and saves it to the `movie_cast` table.      |
 | `movie_crew.py`               | Extracts crew data (e.g. directors, producers) and stores in `movie_crew`.     |
 | `adding_tv_shows_ids.py`      | Parallelized script to fetch and store all TV show IDs from TMDB.              |
