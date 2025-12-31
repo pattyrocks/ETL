@@ -1,6 +1,6 @@
 # 🎬 ETL with Python: TMDB API → DuckDB
 
-This project extracts **all movie and TV show data** from the [TMDB API](https://developer.themoviedb.org/docs), transforms it using `pandas`, and stores it locally in a `DuckDB` database. It is a modular ETL pipeline built with Python, designed to collect comprehensive movie, TV show, cast, and crew information for analysis and exploration.
+This project extracts **all movie and TV show data** from the [TMDB API](https://developer.themoviedb.org/docs), transforms it using `pandas`, and stores it locally in a `DuckDB` database. It is a modular ETL pipeline built with Python, designed to collect comprehensive movie, TV show, cast, and crew information for and exploration.
 
 ---
 
@@ -108,4 +108,4 @@ Build a lightweight, fully local ETL process to collect, clean, and store **all 
 
 ---
 
-> Built by [Patricia Nascimento](https://www.linkedin.com/in/patricians) 👩🏻‍💻
+> Built with AI by [Patricia Nascimento](https://www.linkedin.com/in/patricians) 👩🏻‍💻
