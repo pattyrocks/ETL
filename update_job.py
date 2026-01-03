@@ -10,8 +10,39 @@ API_KEY = os.getenv('TMDBAPIKEY')
 DB_PATH = 'TMDB'
 TMDB_BASE = 'https://api.themoviedb.org/3'
 
-def iso_date(dt):
-    return dt.strftime('%Y-%m-%d')
+# --- canonical column lists ---
+MOVIES_COLS = [
+    'id','title','release_date','original_language','popularity','vote_count',
+    'adult','backdrop_path','belongs_to_collection','budget','genres','homepage',
+    'imdb_id','origin_country','original_title','overview','poster_path',
+    'production_companies','production_countries','revenue','runtime',
+    'spoken_languages','status','tagline','video','vote_average'
+]
+
+MOVIE_CAST_COLS = [
+    'movie_id','person_id','name','credit_id','character','order','gender',
+    'profile_path','known_for_department','popularity','original_name','cast_id'
+]
+
+MOVIE_CREW_COLS = [
+    'movie_id','person_id','name','credit_id','gender','profile_path',
+    'known_for_department','popularity','original_name','adult','department','job'
+]
+
+TV_SHOWS_COLS = [
+    'id','episode_run_time','homepage','in_production','last_air_date',
+    'number_of_episodes','number_of_seasons','origin_country',
+    'production_countries','status','type'
+]
+
+TV_CAST_COLS = [
+    'tv_id','person_id','name','credit_id','character','order','gender',
+    'profile_path','known_for_department','popularity','original_name',
+    'roles','total_episode_count','cast_id','also_known_as'
+]
+
+# --- helpers ---
+def iso_date(dt): return dt.strftime('%Y-%m-%d')
 
 def get_last_run(con, job_name='weekly_update'):
     con.execute('CREATE TABLE IF NOT EXISTS last_updates (job_name VARCHAR PRIMARY KEY, last_run TIMESTAMP);')
@@ -59,54 +90,141 @@ def fetch_tv_detail_and_aggregate(tv_id):
         print(f"TV fetch error {tv_id}: {e}")
         return None, None
 
-def upsert_movies_and_cast_and_crew(con, movies_rows, cast_rows, crew_rows):
-    if movies_rows:
-        df_movies = pd.DataFrame(movies_rows)
-        con.register('df_movies', df_movies)
-        con.execute("CREATE TABLE IF NOT EXISTS movies AS SELECT * FROM df_movies WHERE 1=0;")
-        con.execute("DELETE FROM movies WHERE id IN (SELECT id FROM df_movies);")
-        con.execute("INSERT INTO movies SELECT * FROM df_movies;")
-        con.unregister('df_movies')
-    if cast_rows:
-        df_cast = pd.DataFrame(cast_rows)
-        con.register('df_cast', df_cast)
-        con.execute("CREATE TABLE IF NOT EXISTS movie_cast AS SELECT * FROM df_cast WHERE 1=0;")
-        con.execute("DELETE FROM movie_cast WHERE movie_id IN (SELECT DISTINCT movie_id FROM df_cast);")
-        con.execute("INSERT INTO movie_cast SELECT * FROM df_cast;")
-        con.unregister('df_cast')
-    if crew_rows:
-        df_crew = pd.DataFrame(crew_rows)
-        con.register('df_crew', df_crew)
-        con.execute("CREATE TABLE IF NOT EXISTS movie_crew AS SELECT * FROM df_crew WHERE 1=0;")
-        con.execute("DELETE FROM movie_crew WHERE movie_id IN (SELECT DISTINCT movie_id FROM df_crew);")
-        con.execute("INSERT INTO movie_crew SELECT * FROM df_crew;")
-        con.unregister('df_crew')
+# --- ensure target tables exist with all columns ---
+def ensure_tables(con):
+    con.execute(f"""
+        CREATE TABLE IF NOT EXISTS movies (
+            id BIGINT PRIMARY KEY,
+            title VARCHAR,
+            release_date VARCHAR,
+            original_language VARCHAR,
+            popularity DOUBLE,
+            vote_count INTEGER,
+            adult BOOLEAN,
+            backdrop_path VARCHAR,
+            belongs_to_collection VARCHAR,
+            budget INTEGER,
+            genres VARCHAR,
+            homepage VARCHAR,
+            imdb_id VARCHAR,
+            origin_country VARCHAR,
+            original_title VARCHAR,
+            overview VARCHAR,
+            poster_path VARCHAR,
+            production_companies VARCHAR,
+            production_countries VARCHAR,
+            revenue INTEGER,
+            runtime INTEGER,
+            spoken_languages VARCHAR,
+            status VARCHAR,
+            tagline VARCHAR,
+            video BOOLEAN,
+            vote_average DOUBLE
+        );
+    """)
+    con.execute(f"""
+        CREATE TABLE IF NOT EXISTS movie_cast (
+            movie_id BIGINT,
+            person_id BIGINT,
+            name VARCHAR,
+            credit_id VARCHAR,
+            character VARCHAR,
+            "order" INTEGER,
+            gender INTEGER,
+            profile_path VARCHAR,
+            known_for_department VARCHAR,
+            popularity DOUBLE,
+            original_name VARCHAR,
+            cast_id BIGINT
+        );
+    """)
+    con.execute(f"""
+        CREATE TABLE IF NOT EXISTS movie_crew (
+            movie_id BIGINT,
+            person_id BIGINT,
+            name VARCHAR,
+            credit_id VARCHAR,
+            gender INTEGER,
+            profile_path VARCHAR,
+            known_for_department VARCHAR,
+            popularity DOUBLE,
+            original_name VARCHAR,
+            adult BOOLEAN,
+            department VARCHAR,
+            job VARCHAR
+        );
+    """)
+    con.execute(f"""
+        CREATE TABLE IF NOT EXISTS tv_shows (
+            id BIGINT PRIMARY KEY,
+            episode_run_time VARCHAR,
+            homepage VARCHAR,
+            in_production BOOLEAN,
+            last_air_date VARCHAR,
+            number_of_episodes INTEGER,
+            number_of_seasons INTEGER,
+            origin_country VARCHAR,
+            production_countries VARCHAR,
+            status VARCHAR,
+            type VARCHAR
+        );
+    """)
+    con.execute(f"""
+        CREATE TABLE IF NOT EXISTS tv_show_cast_crew (
+            tv_id BIGINT,
+            person_id BIGINT,
+            name VARCHAR,
+            credit_id VARCHAR,
+            character VARCHAR,
+            "order" INTEGER,
+            gender INTEGER,
+            profile_path VARCHAR,
+            known_for_department VARCHAR,
+            popularity DOUBLE,
+            original_name VARCHAR,
+            roles VARCHAR,
+            total_episode_count INTEGER,
+            cast_id BIGINT,
+            also_known_as VARCHAR
+        );
+    """)
 
-def upsert_tv_and_cast(con, tv_rows, tv_cast_rows):
-    if tv_rows:
-        df_tv = pd.DataFrame(tv_rows)
-        con.register('df_tv', df_tv)
-        con.execute("CREATE TABLE IF NOT EXISTS tv_shows AS SELECT * FROM df_tv WHERE 1=0;")
-        con.execute("DELETE FROM tv_shows WHERE id IN (SELECT id FROM df_tv);")
-        con.execute("INSERT INTO tv_shows SELECT * FROM df_tv;")
-        con.unregister('df_tv')
-    if tv_cast_rows:
-        df = pd.DataFrame(tv_cast_rows)
-        con.register('df_tv_cast', df)
-        con.execute("CREATE TABLE IF NOT EXISTS tv_show_cast_crew AS SELECT * FROM df_tv_cast WHERE 1=0;")
-        con.execute("DELETE FROM tv_show_cast_crew WHERE tv_id IN (SELECT DISTINCT tv_id FROM df_tv_cast);")
-        con.execute("INSERT INTO tv_show_cast_crew SELECT * FROM df_tv_cast;")
-        con.unregister('df_tv_cast')
+# --- upsert helpers (reindex to canonical cols so all columns are considered) ---
+def upsert_table_from_rows(con, rows, table_name, canonical_cols, key_col=None):
+    if not rows:
+        return
+    df = pd.DataFrame(rows)
+    # serialize lists/dicts to string to avoid nested type problems
+    for c in df.columns:
+        df[c] = df[c].apply(lambda v: (str(v) if isinstance(v, (list, dict)) else v))
+    # ensure all canonical columns exist (order consistent for deletes)
+    df = df.reindex(columns=[c for c in canonical_cols if c in df.columns] + [c for c in canonical_cols if c not in df.columns], fill_value=None)
+    # register and upsert
+    con.register('tmp_df', df)
+    # delete existing rows by key if provided, else delete by distinct id column if present
+    if key_col and key_col in df.columns:
+        con.execute(f"DELETE FROM {table_name} WHERE {key_col} IN (SELECT DISTINCT {key_col} FROM tmp_df);")
+    else:
+        # try to detect id-like column for deletion
+        if any(k in df.columns for k in ('id','movie_id','tv_id')):
+            key = 'id' if 'id' in df.columns else ('movie_id' if 'movie_id' in df.columns else 'tv_id')
+            con.execute(f"DELETE FROM {table_name} WHERE {key} IN (SELECT DISTINCT {key} FROM tmp_df);")
+    # build insert column list from df columns (tmp_df columns order)
+    insert_cols = ", ".join(df.columns)
+    con.execute(f"INSERT INTO {table_name} ({insert_cols}) SELECT {insert_cols} FROM tmp_df;")
+    con.unregister('tmp_df')
 
+# --- main run ---
 def run():
     con = duckdb.connect(database=DB_PATH, read_only=False)
+    ensure_tables(con)
+
     last_run = get_last_run(con)
     now = datetime.now(datetime.timezone.utc)
     print(f"Last run: {last_run.isoformat()}, now: {now.isoformat()}")
 
     movie_ids = call_changes('movie', last_run, now)
     tv_ids = call_changes('tv', last_run, now)
-
     print(f"Found {len(movie_ids)} changed movies, {len(tv_ids)} changed tv shows.")
 
     movies_rows = []
@@ -118,30 +236,42 @@ def run():
             continue
         #Some databases can't process nested structures (lists or dictionaries), so flatten them to strings
         detail_row = {k: (str(v) if isinstance(v, (list, dict)) else v) for k,v in detail.items()}
-        movies_rows.append(detail_row)
+        # ensure canonical id present
+        detail_row.setdefault('id', mid)
+        movies_rows.append({k: detail_row.get(k) for k in MOVIES_COLS if k in detail_row or k in MOVIES_COLS})
 
         for c in credits.get('cast', []):
             movie_cast_rows.append({
                 'movie_id': mid,
                 'person_id': c.get('id'),
                 'name': c.get('name'),
-                'character': c.get('character'),
                 'credit_id': c.get('credit_id'),
+                'character': c.get('character'),
                 'order': c.get('order'),
+                'gender': c.get('gender'),
                 'profile_path': c.get('profile_path'),
-                'gender': c.get('gender')
+                'known_for_department': c.get('known_for_department'),
+                'popularity': c.get('popularity'),
+                'original_name': c.get('original_name'),
+                'cast_id': c.get('cast_id')
             })
+
         for crew in credits.get('crew', []):
             movie_crew_rows.append({
                 'movie_id': mid,
                 'person_id': crew.get('id'),
                 'name': crew.get('name'),
-                'job': crew.get('job'),
-                'department': crew.get('department'),
                 'credit_id': crew.get('credit_id'),
-                'profile_path': crew.get('profile_path')
+                'gender': crew.get('gender'),
+                'profile_path': crew.get('profile_path'),
+                'known_for_department': crew.get('known_for_department'),
+                'popularity': crew.get('popularity'),
+                'original_name': crew.get('original_name'),
+                'adult': crew.get('adult'),
+                'department': crew.get('department'),
+                'job': crew.get('job')
             })
-        time.sleep(0.15)
+        time.sleep(0.12)
 
     tv_rows = []
     tv_cast_rows = []
@@ -149,21 +279,35 @@ def run():
         detail, agg = fetch_tv_detail_and_aggregate(tid)
         if not detail:
             continue
-        tv_row = {k: (str(v) if isinstance(v, (list, dict)) else v) for k,v in detail.items()}
-        tv_rows.append(tv_row)
+        detail_row = {k: (str(v) if isinstance(v, (list, dict)) else v) for k,v in detail.items()}
+        detail_row.setdefault('id', tid)
+        tv_rows.append({k: detail_row.get(k) for k in TV_SHOWS_COLS if k in detail_row or k in TV_SHOWS_COLS})
         for c in agg.get('cast', []):
             tv_cast_rows.append({
                 'tv_id': tid,
                 'person_id': c.get('id'),
                 'name': c.get('name'),
+                'credit_id': c.get('credit_id'),
+                'character': c.get('character'),
+                'order': c.get('order'),
+                'gender': c.get('gender'),
+                'profile_path': c.get('profile_path'),
+                'known_for_department': c.get('known_for_department'),
+                'popularity': c.get('popularity'),
+                'original_name': c.get('original_name'),
                 'roles': str(c.get('roles')),
                 'total_episode_count': c.get('total_episode_count'),
-                'profile_path': c.get('profile_path')
+                'cast_id': c.get('cast_id'),
+                'also_known_as': str(c.get('also_known_as')) if c.get('also_known_as') else None
             })
-        time.sleep(0.15)
+        time.sleep(0.12)
 
-    upsert_movies_and_cast_and_crew(con, movies_rows, movie_cast_rows, movie_crew_rows)
-    upsert_tv_and_cast(con, tv_rows, tv_cast_rows)
+    # upsert into DB, ensuring all columns considered
+    upsert_table_from_rows(con, movies_rows, 'movies', MOVIES_COLS, key_col='id')
+    upsert_table_from_rows(con, movie_cast_rows, 'movie_cast', MOVIE_CAST_COLS, key_col='movie_id')
+    upsert_table_from_rows(con, movie_crew_rows, 'movie_crew', MOVIE_CREW_COLS, key_col='movie_id')
+    upsert_table_from_rows(con, tv_rows, 'tv_shows', TV_SHOWS_COLS, key_col='id')
+    upsert_table_from_rows(con, tv_cast_rows, 'tv_show_cast_crew', TV_CAST_COLS, key_col='tv_id')
 
     set_last_run(con, now)
     con.close()
