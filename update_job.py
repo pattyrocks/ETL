@@ -5,6 +5,7 @@ import duckdb
 import pandas as pd
 from datetime import datetime, timedelta
 import math
+import argparse
 
 API_KEY = os.getenv('TMDBAPIKEY')
 DB_PATH = 'TMDB'
@@ -215,17 +216,27 @@ def upsert_table_from_rows(con, rows, table_name, canonical_cols, key_col=None):
     con.unregister('tmp_df')
 
 # --- main run ---
-def run():
-    con = duckdb.connect(database=DB_PATH, read_only=False)
+def run(dry_run=False, in_memory=False, sample_only=0):
+    # choose DB: in-memory or real
+    db_to_use = ':memory:' if (dry_run or in_memory) else DB_PATH
+    con = duckdb.connect(database=db_to_use, read_only=False)
+
+    # ensure tables exist when testing in-memory
     ensure_tables(con)
 
-    last_run = get_last_run(con)
-    now = datetime.now(datetime.timezone.utc)
-    print(f"Last run: {last_run.isoformat()}, now: {now.isoformat()}")
+    last_run = get_last_run(con) if not dry_run else (datetime.utcnow() - timedelta(days=7))
+    now = datetime.utcnow()
+    print(f"Last run: {last_run.isoformat()}, now: {now.isoformat()} (dry_run={dry_run}, in_memory={in_memory})")
 
     movie_ids = call_changes('movie', last_run, now)
     tv_ids = call_changes('tv', last_run, now)
-    print(f"Found {len(movie_ids)} changed movies, {len(tv_ids)} changed tv shows.")
+
+    # apply sampling for quick tests
+    if sample_only and sample_only > 0:
+        movie_ids = movie_ids[:sample_only]
+        tv_ids = tv_ids[:sample_only]
+
+    print(f"Found {len(movie_ids)} changed movies, {len(tv_ids)} changed tv shows (sample_only={sample_only})")
 
     movies_rows = []
     movie_cast_rows = []
@@ -302,16 +313,50 @@ def run():
             })
         time.sleep(0.12)
 
-    # upsert into DB, ensuring all columns considered
-    upsert_table_from_rows(con, movies_rows, 'movies', MOVIES_COLS, key_col='id')
-    upsert_table_from_rows(con, movie_cast_rows, 'movie_cast', MOVIE_CAST_COLS, key_col='movie_id')
-    upsert_table_from_rows(con, movie_crew_rows, 'movie_crew', MOVIE_CREW_COLS, key_col='movie_id')
-    upsert_table_from_rows(con, tv_rows, 'tv_shows', TV_SHOWS_COLS, key_col='id')
-    upsert_table_from_rows(con, tv_cast_rows, 'tv_show_cast_crew', TV_CAST_COLS, key_col='tv_id')
+    # At upsert time: either preview/save or write to DB
+    if dry_run:
+        # print/count previews and save small CSVs for inspection
+        print("DRY RUN: would upsert the following counts:")
+        print(f"  movies: {len(movies_rows)}")
+        print(f"  movie_cast: {len(movie_cast_rows)}")
+        print(f"  movie_crew: {len(movie_crew_rows)}")
+        print(f"  tv_shows: {len(tv_rows)}")
+        print(f"  tv_cast: {len(tv_cast_rows)}")
 
-    set_last_run(con, now)
+        timestamp = now.strftime('%Y%m%dT%H%M%S')
+        if movies_rows:
+            pd.DataFrame(movies_rows).head(50).to_csv(f'/tmp/update_job_movies_preview_{timestamp}.csv', index=False)
+            print(f"  Saved movies preview to /tmp/update_job_movies_preview_{timestamp}.csv")
+        if movie_cast_rows:
+            pd.DataFrame(movie_cast_rows).head(200).to_csv(f'/tmp/update_job_movie_cast_preview_{timestamp}.csv', index=False)
+            print(f"  Saved movie_cast preview to /tmp/update_job_movie_cast_preview_{timestamp}.csv")
+        if movie_crew_rows:
+            pd.DataFrame(movie_crew_rows).head(200).to_csv(f'/tmp/update_job_movie_crew_preview_{timestamp}.csv', index=False)
+            print(f"  Saved movie_crew preview to /tmp/update_job_movie_crew_preview_{timestamp}.csv")
+        if tv_rows:
+            pd.DataFrame(tv_rows).head(50).to_csv(f'/tmp/update_job_tv_preview_{timestamp}.csv', index=False)
+            print(f"  Saved tv_shows preview to /tmp/update_job_tv_preview_{timestamp}.csv")
+        if tv_cast_rows:
+            pd.DataFrame(tv_cast_rows).head(200).to_csv(f'/tmp/update_job_tv_cast_preview_{timestamp}.csv', index=False)
+            print(f"  Saved tv_cast preview to /tmp/update_job_tv_cast_preview_{timestamp}.csv")
+        print("DRY RUN complete. No DB changes made.")
+    else:
+        # real upsert + record last run
+        upsert_table_from_rows(con, movies_rows, 'movies', MOVIES_COLS, key_col='id')
+        upsert_table_from_rows(con, movie_cast_rows, 'movie_cast', MOVIE_CAST_COLS, key_col='movie_id')
+        upsert_table_from_rows(con, movie_crew_rows, 'movie_crew', MOVIE_CREW_COLS, key_col='movie_id')
+        upsert_table_from_rows(con, tv_rows, 'tv_shows', TV_SHOWS_COLS, key_col='id')
+        upsert_table_from_rows(con, tv_cast_rows, 'tv_show_cast_crew', TV_CAST_COLS, key_col='tv_id')
+        set_last_run(con, now)
+        print("Live update complete.")
+
     con.close()
-    print("Update finished.")
 
 if __name__ == '__main__':
-    run()
+    parser = argparse.ArgumentParser(description='TMDB weekly update job')
+    parser.add_argument('--dry-run', action='store_true', help='Do not write to production DB; save preview CSVs to /tmp')
+    parser.add_argument('--in-memory', action='store_true', help='Run against an in-memory DuckDB (no disk writes)')
+    parser.add_argument('--sample', type=int, default=0, help='Process only N changed ids (movies and tv) for quick testing')
+    args = parser.parse_args()
+
+    run(dry_run=args.dry_run, in_memory=args.in_memory, sample_only=args.sample)
