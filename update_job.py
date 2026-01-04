@@ -47,7 +47,7 @@ MOVIE_CAST_COLS = [
     'name',
     'credit_id',
     'character',
-    'order',
+    'cast_order',
     'gender',
     'profile_path',
     'known_for_department',
@@ -91,7 +91,7 @@ TV_CAST_COLS = [
     'name',
     'credit_id',
     'character',
-    'order',
+    'cast_order',
     'gender',
     'profile_path',
     'known_for_department',
@@ -182,7 +182,7 @@ def fetch_tv_detail_and_aggregate(tv_id):
 
 # --- ensure target tables exist with all columns ---
 def ensure_tables(con):
-    # movies: column order matches MOVIES_COLS, use BIGINT for id, budget, revenue
+    # movies: column cast_order matches MOVIES_COLS, use BIGINT for id, budget, revenue
     con.execute(f"""
         CREATE TABLE IF NOT EXISTS movies (
             id BIGINT PRIMARY KEY,
@@ -214,7 +214,7 @@ def ensure_tables(con):
         );
     """)
 
-    # movie_cast: order matches MOVIE_CAST_COLS, ids as BIGINT
+    # movie_cast: cast_order matches MOVIE_CAST_COLS, ids as BIGINT
     con.execute(f"""
         CREATE TABLE IF NOT EXISTS movie_cast (
             movie_id BIGINT,
@@ -222,7 +222,7 @@ def ensure_tables(con):
             name VARCHAR,
             credit_id VARCHAR,
             character VARCHAR,
-            "order" INTEGER,
+            cast_order INTEGER,
             gender INTEGER,
             profile_path VARCHAR,
             known_for_department VARCHAR,
@@ -232,7 +232,7 @@ def ensure_tables(con):
         );
     """)
 
-    # movie_crew: order matches MOVIE_CREW_COLS, ids as BIGINT
+    # movie_crew: cast_order matches MOVIE_CREW_COLS, ids as BIGINT
     con.execute(f"""
         CREATE TABLE IF NOT EXISTS movie_crew (
             movie_id BIGINT,
@@ -250,7 +250,7 @@ def ensure_tables(con):
         );
     """)
 
-    # tv_shows: order matches TV_SHOWS_COLS, id as BIGINT
+    # tv_shows: cast_order matches TV_SHOWS_COLS, id as BIGINT
     con.execute(f"""
         CREATE TABLE IF NOT EXISTS tv_shows (
             id BIGINT PRIMARY KEY,
@@ -267,7 +267,7 @@ def ensure_tables(con):
         );
     """)
 
-    # tv_show_cast_crew: order matches TV_CAST_COLS, ids as BIGINT
+    # tv_show_cast_crew: cast_order matches TV_CAST_COLS, ids as BIGINT
     con.execute(f"""
         CREATE TABLE IF NOT EXISTS tv_show_cast_crew (
             tv_id BIGINT,
@@ -275,7 +275,7 @@ def ensure_tables(con):
             name VARCHAR,
             credit_id VARCHAR,
             character VARCHAR,
-            "order" INTEGER,
+            "cast_order" INTEGER,
             gender INTEGER,
             profile_path VARCHAR,
             known_for_department VARCHAR,
@@ -293,7 +293,7 @@ def upsert_table_from_rows(con, rows, table_name, canonical_cols, key_col=None):
     """
     Upsert rows (list of dict) into table_name using canonical_cols ordering.
     Ensures missing canonical columns are created as NULLs, registers a tmp_df
-    with that exact column order and performs delete+insert based on key_col.
+    with that exact column cast_order and performs delete+insert based on key_col.
     """
     if not rows:
         return
@@ -302,7 +302,7 @@ def upsert_table_from_rows(con, rows, table_name, canonical_cols, key_col=None):
     for c in df.columns:
         df[c] = df[c].apply(lambda v: (str(v) if isinstance(v, (list, dict)) else v))
 
-    # Reindex to canonical columns order, adding missing columns as None
+    # Reindex to canonical columns cast_order, adding missing columns as None
     df_reindexed = df.reindex(columns=canonical_cols, fill_value=None)
 
     # register and upsert using canonical column order
@@ -374,7 +374,7 @@ def run(dry_run=False, in_memory=False, sample_only=0):
                 'name': c.get('name'),
                 'credit_id': c.get('credit_id'),
                 'character': c.get('character'),
-                'order': c.get('order'),
+                'cast_order': c.get('cast_order'),
                 'gender': c.get('gender'),
                 'profile_path': c.get('profile_path'),
                 'known_for_department': c.get('known_for_department'),
@@ -416,7 +416,7 @@ def run(dry_run=False, in_memory=False, sample_only=0):
                 'name': c.get('name'),
                 'credit_id': c.get('credit_id'),
                 'character': c.get('character'),
-                'order': c.get('order'),
+                'cast_order': c.get('cast_order'),
                 'gender': c.get('gender'),
                 'profile_path': c.get('profile_path'),
                 'known_for_department': c.get('known_for_department'),
