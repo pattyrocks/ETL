@@ -13,7 +13,7 @@ con = duckdb.connect(database='TMDB', read_only=False)
 
 con.execute('''
     CREATE TABLE IF NOT EXISTS movies (
-        id INTEGER PRIMARY KEY,
+        id BIGINT PRIMARY KEY,
         title VARCHAR,
         release_date VARCHAR,
         original_language VARCHAR,

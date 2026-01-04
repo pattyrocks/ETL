@@ -16,7 +16,7 @@ con = duckdb.connect(database='TMDB', read_only=False)
 # Create the tv_shows table if it doesn't exist
 con.execute('''
     CREATE TABLE IF NOT EXISTS tv_shows (
-        id INTEGER PRIMARY KEY,
+        id BIGINT PRIMARY KEY,
         name VARCHAR,
         episode_run_time VARCHAR[],
         homepage VARCHAR,
