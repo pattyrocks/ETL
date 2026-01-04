@@ -320,12 +320,12 @@ def main():
                     # be conservative: skip unsafe columns
                     continue
 
-            # ensure uniqueness and preserve order: existing detected cols first, then safe id-like, then budget/revenue forced
+            # ensure uniqueness and preserve cast_order: existing detected cols first, then safe id-like, then budget/revenue forced
             for c in safe_id_like:
                 if c not in cols_to_cast and c not in forced:
                     forced.append(c)
 
-            # merge detected and forced, preserving order and uniqueness
+            # merge detected and forced, preserving cast_order and uniqueness
             if forced:
                 merged = []
                 for c in cols_to_cast + forced:
