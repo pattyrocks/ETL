@@ -195,7 +195,7 @@ def upsert_table_from_rows(con, rows, table_name, canonical_cols, key_col=None):
     if not rows:
         return
     df = pd.DataFrame(rows)
-    # serialize lists/dicts to string to avoid nested type problems
+    # transform lists/dicts to string to avoid nested type problems
     for c in df.columns:
         df[c] = df[c].apply(lambda v: (str(v) if isinstance(v, (list, dict)) else v))
     # ensure all canonical columns exist (order consistent for deletes)
@@ -224,8 +224,8 @@ def run(dry_run=False, in_memory=False, sample_only=0):
     # ensure tables exist when testing in-memory
     ensure_tables(con)
 
-    last_run = get_last_run(con) if not dry_run else (datetime.utcnow() - timedelta(days=7))
-    now = datetime.utcnow()
+    last_run = get_last_run(con) if not dry_run else (datetime.now(datetime.timezone.utc) - timedelta(days=7))
+    now = datetime.now(datetime.timezone.utc)
     print(f"Last run: {last_run.isoformat()}, now: {now.isoformat()} (dry_run={dry_run}, in_memory={in_memory})")
 
     movie_ids = call_changes('movie', last_run, now)
@@ -245,7 +245,7 @@ def run(dry_run=False, in_memory=False, sample_only=0):
         detail, credits = fetch_movie_detail_and_credits(mid)
         if not detail:
             continue
-        #Some databases can't process nested structures (lists or dictionaries), so flatten them to strings
+        #flatten lists or dictionaries to strings
         detail_row = {k: (str(v) if isinstance(v, (list, dict)) else v) for k,v in detail.items()}
         # ensure canonical id present
         detail_row.setdefault('id', mid)
