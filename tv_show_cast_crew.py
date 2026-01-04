@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import math
 
 API_KEY = os.getenv('TMDBAPIKEY')
-DATABASE_PATH = 'tmdb'
+DATABASE_PATH = 'TMDB'
 
 MAX_API_WORKERS = 15
 DB_INSERT_BATCH_SIZE = None  # None means insert all at once

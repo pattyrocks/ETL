@@ -50,7 +50,7 @@ cp TMDB TMDB_test
 - Make a backup and edit DB_PATH in update_job.py (temporary):
 ```bash
 cp update_job.py update_job.py.bak
-sed -i.bak "s/DB_PATH = 'TMDB'/DB_PATH = 'TMDB_test'/" update_job.py
+sed -i.bak "s/DB_PATH = 'TMDB'/DB_PATH = 'TMDB'/" update_job.py
 ```
 - Run limited sample to verify upserts:
 ```bash
@@ -114,7 +114,7 @@ python update_job.py --in-memory --sample 20
 cp TMDB TMDB_test
 
 # Point updater to test DB (temporary)
-sed -i.bak "s/DB_PATH = 'TMDB'/DB_PATH = 'TMDB_test'/" update_job.py
+sed -i.bak "s/DB_PATH = 'TMDB'/DB_PATH = 'TMDB'/" update_job.py
 
 # Run against test DB
 python update_job.py --sample 50
