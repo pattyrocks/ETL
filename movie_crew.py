@@ -29,7 +29,6 @@ def fetch_movie_credits(movie_id):
         for crew_member_dict in crew_list:
             processed_crew_data.append({
                 'movie_id': movie_id,
-                'adult': crew_member_dict.get('adult'),
                 'person_id': crew_member_dict.get('id'),
                 'name': crew_member_dict.get('name'),
                 'credit_id': crew_member_dict.get('credit_id'),
@@ -38,6 +37,7 @@ def fetch_movie_credits(movie_id):
                 'known_for_department': crew_member_dict.get('known_for_department'),
                 'popularity': crew_member_dict.get('popularity'),
                 'original_name': crew_member_dict.get('original_name'),
+                'adult': crew_member_dict.get('adult'),
                 'department': crew_member_dict.get('department'),
                 'job': crew_member_dict.get('job')
             })
