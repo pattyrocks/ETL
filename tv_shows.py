@@ -12,7 +12,7 @@ con = duckdb.connect(database='TMDB', read_only=False)
 
 con.execute('''
     CREATE TABLE IF NOT EXISTS tv_shows (
-        id INTEGER PRIMARY KEY,
+        id BIGINT PRIMARY KEY,
         episode_run_time VARCHAR[],
         homepage VARCHAR,
         in_production BOOLEAN,
