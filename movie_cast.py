@@ -32,7 +32,7 @@ def fetch_movie_credits(movie_id):
                 'name': cast_member_dict.get('name'),
                 'credit_id': cast_member_dict.get('credit_id'),
                 'character': cast_member_dict.get('character'),
-                'order': cast_member_dict.get('order'),
+                'cast_order': cast_member_dict.get('order'),
                 'gender': cast_member_dict.get('gender'),
                 'profile_path': cast_member_dict.get('profile_path'),
                 'known_for_department': cast_member_dict.get('known_for_department'),
@@ -122,7 +122,7 @@ def create_credits():
             name VARCHAR,
             credit_id VARCHAR,
             character VARCHAR,
-            "order" INTEGER, -- "order" is a keyword, so quote it
+            cast_order INTEGER, -- cast_order is a keyword, so quote it
             gender INTEGER,
             profile_path VARCHAR,
             known_for_department VARCHAR,
