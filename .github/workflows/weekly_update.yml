@@ -4,11 +4,21 @@ on:
   schedule:
     # Runs every Friday 03:00 UTC (== Friday 00:00 America/Sao_Paulo / BRT)
     - cron: '0 3 * * FRI'
-  workflow_dispatch: {}  # allows manual runs
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Run as dry-run? true/false'
+        required: false
+        default: 'true'
+      sample:
+        description: 'Sample size for testing (0 = full)'
+        required: false
+        default: '10'
 
 jobs:
   update:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -23,9 +33,25 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run update job
+      - name: Run update job (dry-run by default, sample=10)
         env:
           TMDBAPIKEY: ${{ secrets.TMDBAPIKEY }}
         run: |
-          # run without --dry-run for production; use --dry-run to test
-          python update_job.py
+          set -euo pipefail
+          DRY="${{ github.event.inputs.dry_run }}"
+          SAMPLE="${{ github.event.inputs.sample }}"
+          if [ -z "$DRY" ] || [ "$DRY" = "true" ]; then
+            echo "Running dry-run (sample=$SAMPLE)"
+            if [ -n "$SAMPLE" ] && [ "$SAMPLE" != "0" ]; then
+              python update_job.py --dry-run --sample="$SAMPLE"
+            else
+              python update_job.py --dry-run
+            fi
+          else
+            echo "Running live update (sample=$SAMPLE)"
+            if [ -n "$SAMPLE" ] && [ "$SAMPLE" != "0" ]; then
+              python update_job.py --sample="$SAMPLE"
+            else
+              python update_job.py
+            fi
+          fi
