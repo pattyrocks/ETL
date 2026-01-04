@@ -220,28 +220,41 @@ def ensure_tables(con):
 
 # --- upsert helpers (reindex to canonical cols so all columns are considered) ---
 def upsert_table_from_rows(con, rows, table_name, canonical_cols, key_col=None):
+    """
+    Upsert rows (list of dict) into table_name using canonical_cols ordering.
+    Ensures missing canonical columns are created as NULLs, registers a tmp_df
+    with that exact column order and performs delete+insert based on key_col.
+    """
     if not rows:
         return
     df = pd.DataFrame(rows)
     # transform lists/dicts to string to avoid nested type problems
     for c in df.columns:
         df[c] = df[c].apply(lambda v: (str(v) if isinstance(v, (list, dict)) else v))
-    # ensure all canonical columns exist (order consistent for deletes)
-    df = df.reindex(columns=[c for c in canonical_cols if c in df.columns] + [c for c in canonical_cols if c not in df.columns], fill_value=None)
-    # register and upsert
-    con.register('tmp_df', df)
-    # delete existing rows by key if provided, else delete by distinct id column if present
-    if key_col and key_col in df.columns:
-        con.execute(f"DELETE FROM {table_name} WHERE {key_col} IN (SELECT DISTINCT {key_col} FROM tmp_df);")
-    else:
-        # try to detect id-like column for deletion
-        if any(k in df.columns for k in ('id','movie_id','tv_id')):
-            key = 'id' if 'id' in df.columns else ('movie_id' if 'movie_id' in df.columns else 'tv_id')
-            con.execute(f"DELETE FROM {table_name} WHERE {key} IN (SELECT DISTINCT {key} FROM tmp_df);")
-    # build insert column list from df columns (tmp_df columns order)
-    insert_cols = ", ".join(df.columns)
-    con.execute(f"INSERT INTO {table_name} ({insert_cols}) SELECT {insert_cols} FROM tmp_df;")
-    con.unregister('tmp_df')
+
+    # Reindex to canonical columns order, adding missing columns as None
+    df_reindexed = df.reindex(columns=canonical_cols, fill_value=None)
+
+    # register and upsert using canonical column order
+    con.register('tmp_df', df_reindexed)
+    try:
+        # delete existing rows by key if provided
+        if key_col and key_col in df_reindexed.columns:
+            con.execute(f"DELETE FROM {table_name} WHERE {key_col} IN (SELECT DISTINCT {key_col} FROM tmp_df);")
+        else:
+            # try to detect id-like column for deletion
+            if any(k in df_reindexed.columns for k in ('id','movie_id','tv_id')):
+                key = 'id' if 'id' in df_reindexed.columns else ('movie_id' if 'movie_id' in df_reindexed.columns else 'tv_id')
+                con.execute(f"DELETE FROM {table_name} WHERE {key} IN (SELECT DISTINCT {key} FROM tmp_df);")
+
+        # build insert column list from canonical_cols (ensures same ordering as movie_crew table)
+        insert_cols = ", ".join(canonical_cols)
+        con.execute(f"INSERT INTO {table_name} ({insert_cols}) SELECT {insert_cols} FROM tmp_df;")
+    finally:
+        try:
+            con.unregister('tmp_df')
+        except Exception:
+            pass
 
 def _format_seconds(s: float) -> str:
     hrs, rem = divmod(s, 3600)

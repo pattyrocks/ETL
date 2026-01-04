@@ -8,7 +8,7 @@ import math
 
 tmdb.API_KEY = os.getenv('TMDBAPIKEY')
 
-DATABASE_PATH = 'tmdb'
+DATABASE_PATH = 'TMDB'
 
 MAX_API_WORKERS = 15
 
