@@ -3,7 +3,7 @@ import time
 import requests
 import duckdb
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 import math
 import argparse
 
@@ -56,22 +56,50 @@ def get_last_run(con, job_name='weekly_update'):
                 return datetime.strptime(row[0], "%Y-%m-%dT%H:%M:%S")
             except Exception:
                 pass
-    return datetime.now(datetime.timezone.utc) - timedelta(days=7)
+    return datetime.now(timezone.utc) - timedelta(days=7)
 
 def set_last_run(con, ts, job_name='weekly_update'):
     con.execute("INSERT OR REPLACE INTO last_updates (job_name, last_run) VALUES (?, ?);", [job_name, ts.isoformat()])
 
-def call_changes(endpoint, start_date, end_date):
+def call_changes(endpoint, start_date, end_date, max_pages=1000):
+    """
+    Retrieve all pages from the TMDB /{endpoint}/changes endpoint between start_date and end_date.
+    Returns a list of IDs found across all pages.
+    """
     url = f"{TMDB_BASE}/{endpoint}/changes"
-    params = {'api_key': API_KEY, 'start_date': iso_date(start_date), 'end_date': iso_date(end_date)}
-    try:
-        resp = requests.get(url, params=params, timeout=30)
-        resp.raise_for_status()
-        data = resp.json()
-        return [r['id'] for r in data.get('results', [])]
-    except Exception as e:
-        print(f"Error calling changes {endpoint}: {e}")
-        return []
+    page = 1
+    ids = []
+    while page <= max_pages:
+        params = {
+            'api_key': API_KEY,
+            'start_date': iso_date(start_date),
+            'end_date': iso_date(end_date),
+            'page': page
+        }
+        try:
+            resp = requests.get(url, params=params, timeout=30)
+            resp.raise_for_status()
+            data = resp.json()
+            results = data.get('results', [])
+            ids.extend([r['id'] for r in results if 'id' in r])
+            total_pages = data.get('total_pages') or data.get('total_pages', 1)
+            if not results or page >= int(total_pages):
+                break
+            page += 1
+            time.sleep(0.25)  # small pause to avoid rate limits
+        except requests.exceptions.HTTPError as he:
+            # If rate limited, back off a bit then retry this page once
+            status = getattr(he.response, 'status_code', None)
+            print(f"HTTPError on changes {endpoint} page {page}: {he} (status {status})")
+            if status == 429:
+                print("Rate limited, sleeping 2s then retrying...")
+                time.sleep(2)
+                continue
+            break
+        except Exception as e:
+            print(f"Error calling changes {endpoint} page {page}: {e}")
+            break
+    return ids
 
 def fetch_movie_detail_and_credits(movie_id):
     try:
@@ -215,8 +243,14 @@ def upsert_table_from_rows(con, rows, table_name, canonical_cols, key_col=None):
     con.execute(f"INSERT INTO {table_name} ({insert_cols}) SELECT {insert_cols} FROM tmp_df;")
     con.unregister('tmp_df')
 
-# --- main run ---
+def _format_seconds(s: float) -> str:
+    hrs, rem = divmod(s, 3600)
+    mins, secs = divmod(rem, 60)
+    return f"{int(hrs)}h {int(mins)}m {secs:.2f}s"
+
 def run(dry_run=False, in_memory=False, sample_only=0):
+    run_start = time.time()
+
     # choose DB: in-memory or real
     db_to_use = ':memory:' if (dry_run or in_memory) else DB_PATH
     con = duckdb.connect(database=db_to_use, read_only=False)
@@ -224,8 +258,8 @@ def run(dry_run=False, in_memory=False, sample_only=0):
     # ensure tables exist when testing in-memory
     ensure_tables(con)
 
-    last_run = get_last_run(con) if not dry_run else (datetime.now(datetime.timezone.utc) - timedelta(days=7))
-    now = datetime.now(datetime.timezone.utc)
+    last_run = get_last_run(con) if not dry_run else (datetime.now(timezone.utc) - timedelta(days=7))
+    now = datetime.now(timezone.utc)
     print(f"Last run: {last_run.isoformat()}, now: {now.isoformat()} (dry_run={dry_run}, in_memory={in_memory})")
 
     movie_ids = call_changes('movie', last_run, now)
@@ -236,21 +270,20 @@ def run(dry_run=False, in_memory=False, sample_only=0):
         movie_ids = movie_ids[:sample_only]
         tv_ids = tv_ids[:sample_only]
 
-    print(f"Found {len(movie_ids)} changed movies, {len(tv_ids)} changed tv shows (sample_only={sample_only})")
+    total_changes = len(movie_ids) + len(tv_ids)
+    print(f"Found {len(movie_ids)} changed movies, {len(tv_ids)} changed tv shows (total changes: {total_changes})")
 
-    movies_rows = []
-    movie_cast_rows = []
-    movie_crew_rows = []
+    # fetch details phase (time this phase to compute avg per-item)
+    fetch_start = time.time()
+    movies_rows, movie_cast_rows, movie_crew_rows = [], [], []
+    processed_movie_count = 0
     for mid in movie_ids:
         detail, credits = fetch_movie_detail_and_credits(mid)
         if not detail:
             continue
-        #flatten lists or dictionaries to strings
         detail_row = {k: (str(v) if isinstance(v, (list, dict)) else v) for k,v in detail.items()}
-        # ensure canonical id present
         detail_row.setdefault('id', mid)
-        movies_rows.append({k: detail_row.get(k) for k in MOVIES_COLS if k in detail_row or k in MOVIES_COLS})
-
+        movies_rows.append({k: detail_row.get(k) for k in MOVIES_COLS if k in MOVIES_COLS})
         for c in credits.get('cast', []):
             movie_cast_rows.append({
                 'movie_id': mid,
@@ -266,7 +299,6 @@ def run(dry_run=False, in_memory=False, sample_only=0):
                 'original_name': c.get('original_name'),
                 'cast_id': c.get('cast_id')
             })
-
         for crew in credits.get('crew', []):
             movie_crew_rows.append({
                 'movie_id': mid,
@@ -282,17 +314,18 @@ def run(dry_run=False, in_memory=False, sample_only=0):
                 'department': crew.get('department'),
                 'job': crew.get('job')
             })
+        processed_movie_count += 1
         time.sleep(0.12)
 
-    tv_rows = []
-    tv_cast_rows = []
+    tv_rows, tv_cast_rows = [], []
+    processed_tv_count = 0
     for tid in tv_ids:
         detail, agg = fetch_tv_detail_and_aggregate(tid)
         if not detail:
             continue
         detail_row = {k: (str(v) if isinstance(v, (list, dict)) else v) for k,v in detail.items()}
         detail_row.setdefault('id', tid)
-        tv_rows.append({k: detail_row.get(k) for k in TV_SHOWS_COLS if k in detail_row or k in TV_SHOWS_COLS})
+        tv_rows.append({k: detail_row.get(k) for k in TV_SHOWS_COLS if k in TV_SHOWS_COLS})
         for c in agg.get('cast', []):
             tv_cast_rows.append({
                 'tv_id': tid,
@@ -311,44 +344,65 @@ def run(dry_run=False, in_memory=False, sample_only=0):
                 'cast_id': c.get('cast_id'),
                 'also_known_as': str(c.get('also_known_as')) if c.get('also_known_as') else None
             })
+        processed_tv_count += 1
         time.sleep(0.12)
 
-    # At upsert time: either preview/save or write to DB
-    if dry_run:
-        # print/count previews and save small CSVs for inspection
-        print("DRY RUN: would upsert the following counts:")
-        print(f"  movies: {len(movies_rows)}")
-        print(f"  movie_cast: {len(movie_cast_rows)}")
-        print(f"  movie_crew: {len(movie_crew_rows)}")
-        print(f"  tv_shows: {len(tv_rows)}")
-        print(f"  tv_cast: {len(tv_cast_rows)}")
+    fetch_end = time.time()
+    fetch_elapsed = fetch_end - fetch_start
+    processed_count = processed_movie_count + processed_tv_count
+    avg_per_item = fetch_elapsed / processed_count if processed_count > 0 else 0
+    predicted_fetch_total = avg_per_item * total_changes
 
+    print(f"Fetch phase: processed {processed_count} items in {_format_seconds(fetch_elapsed)} (avg {_format_seconds(avg_per_item)} per item)")
+    if sample_only and sample_only > 0 and processed_count < total_changes:
+        print(f"Prediction: estimated full fetch time for {total_changes} items is {_format_seconds(predicted_fetch_total)} based on sample")
+
+    # upsert phase (time DB operations)
+    upsert_start = time.time()
+    if dry_run:
+        # preview CSV logic (unchanged)
         timestamp = now.strftime('%Y%m%dT%H%M%S')
         if movies_rows:
-            pd.DataFrame(movies_rows).head(50).to_csv(f'/tmp/update_job_movies_preview_{timestamp}.csv', index=False)
-            print(f"  Saved movies preview to /tmp/update_job_movies_preview_{timestamp}.csv")
+            dfm = pd.DataFrame(movies_rows).head(50)
+            dfm = dfm.replace('', pd.NA).fillna('None')
+            dfm.to_csv(f'/tmp/update_job_movies_preview_{timestamp}.csv', index=False, na_rep='None')
         if movie_cast_rows:
-            pd.DataFrame(movie_cast_rows).head(200).to_csv(f'/tmp/update_job_movie_cast_preview_{timestamp}.csv', index=False)
-            print(f"  Saved movie_cast preview to /tmp/update_job_movie_cast_preview_{timestamp}.csv")
+            dfc = pd.DataFrame(movie_cast_rows).head(200)
+            dfc = dfc.replace('', pd.NA).fillna('None')
+            dfc.to_csv(f'/tmp/update_job_movie_cast_preview_{timestamp}.csv', index=False, na_rep='None')
         if movie_crew_rows:
-            pd.DataFrame(movie_crew_rows).head(200).to_csv(f'/tmp/update_job_movie_crew_preview_{timestamp}.csv', index=False)
-            print(f"  Saved movie_crew preview to /tmp/update_job_movie_crew_preview_{timestamp}.csv")
+            dfcr = pd.DataFrame(movie_crew_rows).head(200)
+            dfcr = dfcr.replace('', pd.NA).fillna('None')
+            dfcr.to_csv(f'/tmp/update_job_movie_crew_preview_{timestamp}.csv', index=False, na_rep='None')
         if tv_rows:
-            pd.DataFrame(tv_rows).head(50).to_csv(f'/tmp/update_job_tv_preview_{timestamp}.csv', index=False)
-            print(f"  Saved tv_shows preview to /tmp/update_job_tv_preview_{timestamp}.csv")
+            dftv = pd.DataFrame(tv_rows).head(50)
+            dftv = dftv.replace('', pd.NA).fillna('None')
+            dftv.to_csv(f'/tmp/update_job_tv_preview_{timestamp}.csv', index=False, na_rep='None')
         if tv_cast_rows:
-            pd.DataFrame(tv_cast_rows).head(200).to_csv(f'/tmp/update_job_tv_cast_preview_{timestamp}.csv', index=False)
-            print(f"  Saved tv_cast preview to /tmp/update_job_tv_cast_preview_{timestamp}.csv")
-        print("DRY RUN complete. No DB changes made.")
+            dftvc = pd.DataFrame(tv_cast_rows).head(200)
+            dftvc = dftvc.replace('', pd.NA).fillna('None')
+            dftvc.to_csv(f'/tmp/update_job_tv_cast_preview_{timestamp}.csv', index=False, na_rep='None')
     else:
-        # real upsert + record last run
         upsert_table_from_rows(con, movies_rows, 'movies', MOVIES_COLS, key_col='id')
         upsert_table_from_rows(con, movie_cast_rows, 'movie_cast', MOVIE_CAST_COLS, key_col='movie_id')
         upsert_table_from_rows(con, movie_crew_rows, 'movie_crew', MOVIE_CREW_COLS, key_col='movie_id')
         upsert_table_from_rows(con, tv_rows, 'tv_shows', TV_SHOWS_COLS, key_col='id')
         upsert_table_from_rows(con, tv_cast_rows, 'tv_show_cast_crew', TV_CAST_COLS, key_col='tv_id')
         set_last_run(con, now)
-        print("Live update complete.")
+
+    upsert_end = time.time()
+    upsert_elapsed = upsert_end - upsert_start
+
+    run_end = time.time()
+    total_elapsed = run_end - run_start
+
+    # final prints: actual run time and prediction (if sample was used)
+    print(f"DB upsert phase took {_format_seconds(upsert_elapsed)}")
+    print(f"Total run time: {_format_seconds(total_elapsed)}")
+
+    if sample_only and sample_only > 0 and processed_count > 0:
+        estimated_total_run = predicted_fetch_total + upsert_elapsed
+        print(f"Estimated total run time for full dataset ({total_changes} items): {_format_seconds(estimated_total_run)} (based on sample)")
 
     con.close()
 
