@@ -29,6 +29,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
+        shell: zsh
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
@@ -36,20 +37,21 @@ jobs:
       - name: Run update job (dry-run by default, sample=10)
         env:
           TMDBAPIKEY: ${{ secrets.TMDBAPIKEY }}
+        shell: zsh
         run: |
           set -euo pipefail
           DRY="${{ github.event.inputs.dry_run }}"
           SAMPLE="${{ github.event.inputs.sample }}"
-          if [ -z "$DRY" ] || [ "$DRY" = "true" ]; then
+          if [[ -z "$DRY" ]] || [[ "$DRY" == "true" ]]; then
             echo "Running dry-run (sample=$SAMPLE)"
-            if [ -n "$SAMPLE" ] && [ "$SAMPLE" != "0" ]; then
+            if [[ -n "$SAMPLE" ]] && [[ "$SAMPLE" != "0" ]]; then
               python update_job.py --dry-run --sample="$SAMPLE"
             else
               python update_job.py --dry-run
             fi
           else
             echo "Running live update (sample=$SAMPLE)"
-            if [ -n "$SAMPLE" ] && [ "$SAMPLE" != "0" ]; then
+            if [[ -n "$SAMPLE" ]] && [[ "$SAMPLE" != "0" ]]; then
               python update_job.py --sample="$SAMPLE"
             else
               python update_job.py
