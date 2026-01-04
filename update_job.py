@@ -13,33 +13,94 @@ TMDB_BASE = 'https://api.themoviedb.org/3'
 
 # --- canonical column lists ---
 MOVIES_COLS = [
-    'id','title','release_date','original_language','popularity','vote_count',
-    'adult','backdrop_path','belongs_to_collection','budget','genres','homepage',
-    'imdb_id','origin_country','original_title','overview','poster_path',
-    'production_companies','production_countries','revenue','runtime',
-    'spoken_languages','status','tagline','video','vote_average'
+    'id',
+    'adult',
+    'backdrop_path',
+    'belongs_to_collection',
+    'budget',
+    'genres',
+    'homepage',
+    'imdb_id',
+    'origin_country',
+    'original_language',
+    'original_title',
+    'overview',
+    'popularity',
+    'poster_path',
+    'production_companies',
+    'production_countries',
+    'release_date',
+    'revenue',
+    'runtime',
+    'spoken_languages',
+    'status',
+    'tagline',
+    'title',
+    'video',
+    'vote_average',
+    'vote_count',
 ]
 
 MOVIE_CAST_COLS = [
-    'movie_id','person_id','name','credit_id','character','order','gender',
-    'profile_path','known_for_department','popularity','original_name','cast_id'
+    'movie_id',
+    'person_id',
+    'name',
+    'credit_id',
+    'character',
+    'order',
+    'gender',
+    'profile_path',
+    'known_for_department',
+    'popularity',
+    'original_name',
+    'cast_id',
 ]
 
 MOVIE_CREW_COLS = [
-    'movie_id','person_id','name','credit_id','gender','profile_path',
-    'known_for_department','popularity','original_name','adult','department','job'
+    'movie_id',
+    'person_id',
+    'name',
+    'credit_id',
+    'gender',
+    'profile_path',
+    'known_for_department',
+    'popularity',
+    'original_name',
+    'adult',
+    'department',
+    'job',
 ]
 
 TV_SHOWS_COLS = [
-    'id','episode_run_time','homepage','in_production','last_air_date',
-    'number_of_episodes','number_of_seasons','origin_country',
-    'production_countries','status','type'
+    'id',
+    'episode_run_time',
+    'homepage',
+    'in_production',
+    'last_air_date',
+    'number_of_episodes',
+    'number_of_seasons',
+    'origin_country',
+    'production_countries',
+    'status',
+    'type',
 ]
 
 TV_CAST_COLS = [
-    'tv_id','person_id','name','credit_id','character','order','gender',
-    'profile_path','known_for_department','popularity','original_name',
-    'roles','total_episode_count','cast_id','also_known_as'
+    'tv_id',
+    'person_id',
+    'name',
+    'credit_id',
+    'character',
+    'order',
+    'gender',
+    'profile_path',
+    'known_for_department',
+    'popularity',
+    'original_name',
+    'roles',
+    'total_episode_count',
+    'cast_id',
+    'also_known_as',
 ]
 
 # --- helpers ---
@@ -121,6 +182,7 @@ def fetch_tv_detail_and_aggregate(tv_id):
 
 # --- ensure target tables exist with all columns ---
 def ensure_tables(con):
+    # movies: column order matches MOVIES_COLS, use BIGINT for id, budget, revenue
     con.execute(f"""
         CREATE TABLE IF NOT EXISTS movies (
             id BIGINT PRIMARY KEY,
@@ -132,7 +194,7 @@ def ensure_tables(con):
             adult BOOLEAN,
             backdrop_path VARCHAR,
             belongs_to_collection VARCHAR,
-            budget INTEGER,
+            budget BIGINT,
             genres VARCHAR,
             homepage VARCHAR,
             imdb_id VARCHAR,
@@ -142,7 +204,7 @@ def ensure_tables(con):
             poster_path VARCHAR,
             production_companies VARCHAR,
             production_countries VARCHAR,
-            revenue INTEGER,
+            revenue BIGINT,
             runtime INTEGER,
             spoken_languages VARCHAR,
             status VARCHAR,
@@ -151,6 +213,8 @@ def ensure_tables(con):
             vote_average DOUBLE
         );
     """)
+
+    # movie_cast: order matches MOVIE_CAST_COLS, ids as BIGINT
     con.execute(f"""
         CREATE TABLE IF NOT EXISTS movie_cast (
             movie_id BIGINT,
@@ -167,6 +231,8 @@ def ensure_tables(con):
             cast_id BIGINT
         );
     """)
+
+    # movie_crew: order matches MOVIE_CREW_COLS, ids as BIGINT
     con.execute(f"""
         CREATE TABLE IF NOT EXISTS movie_crew (
             movie_id BIGINT,
@@ -183,6 +249,8 @@ def ensure_tables(con):
             job VARCHAR
         );
     """)
+
+    # tv_shows: order matches TV_SHOWS_COLS, id as BIGINT
     con.execute(f"""
         CREATE TABLE IF NOT EXISTS tv_shows (
             id BIGINT PRIMARY KEY,
@@ -198,6 +266,8 @@ def ensure_tables(con):
             type VARCHAR
         );
     """)
+
+    # tv_show_cast_crew: order matches TV_CAST_COLS, ids as BIGINT
     con.execute(f"""
         CREATE TABLE IF NOT EXISTS tv_show_cast_crew (
             tv_id BIGINT,
