@@ -56,10 +56,18 @@ jobs:
             fi
           fi
 
-      - name: Upload DB snapshot artifact (only on live runs)
-        if: ${{ github.event.inputs.dry_run != 'true' }}
+      - name: Upload preview artifacts (dry-run only)
+        if: ${{ github.event.inputs.dry_run != 'false' }}
         uses: actions/upload-artifact@v4
         with:
-          name: tmdb-database-snapshot
-          path: TMDB
+          name: tmdb-previews
+          # upload any preview CSVs created by update_job.py; glob covers all preview files
+          path: /tmp/update_job_*_preview_*.csv
           retention-days: 7
+
+      - name: Download previews into workspace (dry-run only)
+        if: ${{ github.event.inputs.dry_run != 'false' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: tmdb-previews
+          path: previews
