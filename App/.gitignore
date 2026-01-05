@@ -2,3 +2,6 @@ node_modules
 .next
 .env.local
 dist
+README.md
+.DS_Store
+.vscode
