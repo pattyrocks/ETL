@@ -1,6 +1,10 @@
 import { NextResponse } from 'next/server';
 import { Pool } from 'pg';
 
+declare global {
+  var __pgPool: any;
+}
+
 const connString = process.env.MOTHERDUCK_DATABASE_URL || process.env.DATABASE_URL;
 
 if (!global.__pgPool) {
