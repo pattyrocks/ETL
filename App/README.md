@@ -30,3 +30,21 @@ Deployment: this project is intended for deployment to Vercel. Add `MOTHERDUCK_D
 Next steps:
 - Wire ETL to ingest TMDB data into MotherDuck tables.
 - Build UI pages (browse, detail, search) and pagination.
+
+Upload DuckDB to MotherDuck (local script)
+
+1. Install Python dependencies:
+
+```bash
+python -m pip install duckdb pandas sqlalchemy psycopg2-binary
+```
+
+2. Run the included script to upload all tables from a DuckDB file to MotherDuck:
+
+```bash
+export MOTHERDUCK_DATABASE_URL="postgres://user:pass@host:5432/dbname"
+python App/scripts/duckdb_to_motherduck.py --duckdb-file /Users/patyrocks/Documents/pyground/ETL/TMDB
+```
+
+The script will create or replace tables in MotherDuck with the same table names and basic types inferred by pandas/SQLAlchemy.
+
