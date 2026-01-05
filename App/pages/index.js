@@ -23,7 +23,7 @@ export default function Home() {
         {movies.map((m) => (
           <li key={m.id} style={{ padding: 8, borderBottom: '1px solid #eee' }}>
             <strong>{m.title}</strong>
-            {m.release_date && <span style={{ marginLeft: 8, color: '#666' }}>({m.release_date?.slice(0,4)})</span>}
+            {m.release_date && <span style={{ marginLeft: 8, color: '#666' }}>({m.release_date.slice(0,4)})</span>}
           </li>
         ))}
       </ul>
