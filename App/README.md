@@ -14,7 +14,7 @@ npm install
 2. Set environment variable for MotherDuck (Postgres-compatible) connection string:
 
 ```bash
-export MOTHERDUCK_DATABASE_URL="postgres://user:pass@host:5432/dbname"
+export MOTHERDUCK_DATABASE_URL="duckdb:///md:TMDB"
 ```
 
 3. Run dev server
@@ -42,7 +42,7 @@ python -m pip install duckdb pandas sqlalchemy psycopg2-binary
 2. Run the included script to upload all tables from a DuckDB file to MotherDuck:
 
 ```bash
-export MOTHERDUCK_DATABASE_URL="postgres://user:pass@host:5432/dbname"
+export MOTHERDUCK_DATABASE_URL="duckdb:///md:TMDB"
 python App/scripts/duckdb_to_motherduck.py --duckdb-file /Users/patyrocks/Documents/pyground/ETL/TMDB
 ```
 
