@@ -1,35 +1,19 @@
 'use client';
 
-import Image from "next/image";
-import { useEffect, useState } from "react";
+import Link from 'next/link';
 
 export default function Home() {
-  const [movies, setMovies] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const fetchMovies = async () => {
-      try {
-        const res = await fetch("/api/movies");
-        if (!res.ok) throw new Error("Failed to fetch movies");
-        const data = await res.json();
-        setMovies(data);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Unknown error");
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchMovies();
-  }, []);
-
   return (
     <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-zinc-900 to-black">
       <div className="text-center">
         <h1 className="text-6xl font-bold text-white mb-4">Hello World!</h1>
-        <p className="text-xl text-zinc-400">TMDB ETL Application</p>
+        <p className="text-xl text-zinc-400 mb-8">TMDB ETL Application</p>
+        <Link
+          href="/movies"
+          className="inline-block px-6 py-3 bg-amber-600 hover:bg-amber-700 text-white font-semibold rounded-lg transition"
+        >
+          View Top Movies 2025
+        </Link>
       </div>
     </div>
   );
