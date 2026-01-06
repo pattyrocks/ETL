@@ -1,36 +1,47 @@
 import { NextResponse } from 'next/server';
 import duckdb from 'duckdb';
-import path from 'path';
 
-declare global {
-  var __duckdbInstance: duckdb.Database | undefined;
-}
+let dbInstance: duckdb.Database | null = null;
 
-function getDuckDB(): duckdb.Database {
-  if (!global.__duckdbInstance) {
-    const dbPath = path.join(process.cwd(), '../../TMDB');
-    global.__duckdbInstance = new duckdb.Database(dbPath);
-  }
-  return global.__duckdbInstance;
+function getDuckDB(): Promise<duckdb.Database> {
+  return new Promise((resolve, reject) => {
+    if (dbInstance) {
+      resolve(dbInstance);
+      return;
+    }
+
+    const dbPath = '/Users/patyrocks/Documents/pyground/ETL/TMDB';
+    console.log('Initializing DuckDB at:', dbPath);
+    
+    const db = new duckdb.Database(dbPath, (err) => {
+      if (err) {
+        console.error('Failed to open database:', err);
+        reject(err);
+      } else {
+        console.log('Database opened successfully');
+        dbInstance = db;
+        resolve(db);
+      }
+    });
+  });
 }
 
 export async function GET() {
-  return new Promise((resolve) => {
-    try {
-      const db = getDuckDB();
-      const conn = db.connect();
-
-      conn.all(
+  try {
+    const db = await getDuckDB();
+    
+    return new Promise((resolve) => {
+      db.all(
         `
         SELECT id, title, release_date, vote_average, popularity
         FROM movies
-        WHERE YEAR(CAST(release_date AS DATE)) = 2025
+        WHERE release_date LIKE '2025%'
         ORDER BY vote_average DESC
         LIMIT 10;
         `,
         (err: Error | null, result: any[]) => {
           if (err) {
-            console.error('Database error:', err);
+            console.error('Query error:', err);
             resolve(
               NextResponse.json(
                 { error: err.message },
@@ -38,18 +49,26 @@ export async function GET() {
               )
             );
           } else {
-            resolve(NextResponse.json(result));
+            console.log('Query success, rows:', result?.length || 0);
+            // Serialize with BigInt support
+            const jsonString = JSON.stringify(result, (_, value) =>
+              typeof value === 'bigint' ? value.toString() : value
+            );
+            resolve(
+              new Response(jsonString, {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' },
+              })
+            );
           }
         }
       );
-    } catch (err) {
-      console.error('Database error:', err);
-      resolve(
-        NextResponse.json(
-          { error: err instanceof Error ? err.message : 'Database error' },
-          { status: 500 }
-        )
-      );
-    }
-  });
+    });
+  } catch (err) {
+    console.error('Database initialization error:', err);
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : 'Database error' },
+      { status: 500 }
+    );
+  }
 }
