@@ -25,10 +25,11 @@ export async function GET() {
 
     console.log('Executing query:', sqlQuery);
 
+    // Try without "Bearer" prefix - MotherDuck might expect just the token
     const response = await fetch('https://api.motherduck.com/api/v0/sql', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${motherduckToken}`,
+        'Authorization': motherduckToken, // Remove "Bearer" prefix
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
