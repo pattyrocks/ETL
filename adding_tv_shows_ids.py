@@ -21,7 +21,7 @@ con.execute('''
         episode_run_time VARCHAR[],
         homepage VARCHAR,
         in_production BOOLEAN,
-        last_air_date VARCHAR,
+        last_air_date DATE,
         number_of_episodes INTEGER,
         number_of_seasons INTEGER,
         origin_country VARCHAR[],

@@ -1,3 +1,9 @@
+# DuckDB database files
+TMDB
+TMDB.wal
+*.duckdb
+*.duckdb.wal
+
 .DS_Store
 Pipfile
 Pipfile.lock
@@ -5,3 +11,7 @@ Pipfile.lock
 TMDB
 TMDB.wal
 .venv
+
+# Backup directory
+backups/
+*.backup

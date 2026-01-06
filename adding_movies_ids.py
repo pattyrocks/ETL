@@ -15,10 +15,7 @@ con.execute('''
     CREATE TABLE IF NOT EXISTS movies (
         id BIGINT PRIMARY KEY,
         title VARCHAR,
-        release_date VARCHAR,
-        original_language VARCHAR,
-        popularity DOUBLE,
-        vote_count INTEGER
+        release_date DATE  -- Changed from VARCHAR to DATE
     );
 ''')
 
@@ -110,7 +107,7 @@ def populate_all_movie_ids_parallel(start_year=1874, end_year=datetime.now().yea
                     vote_count = movie.get('vote_count', 0)
                     try:
                         con.execute(
-                            f"INSERT OR IGNORE INTO movies (id, title, release_date, original_language, popularity, vote_count) "
+                            f"INSERT OR IGNORE INTO movies (id, title, CAST(release_date AS DATE), original_language, popularity, vote_count) "
                             f"VALUES ({movie_id}, '{title}', '{release_date}', '{original_language}', {popularity}, {vote_count});"
                         )
                         inserted_count += 1

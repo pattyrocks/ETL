@@ -1,50 +1,63 @@
 import { NextResponse } from 'next/server';
+import { Database } from 'duckdb';
 
 export async function GET() {
-  try {
-    const motherduckToken = process.env.MOTHERDUCK_TOKEN;
-    const motherduckDatabase = process.env.MOTHERDUCK_DATABASE || 'TMDB';
+  return new Promise((resolve) => {
+    const token = process.env.tmdb_MOTHERDUCK_TOKEN;
+    const databaseName = process.env.MOTHERDUCK_DATABASE_NAME || 'TMDB';
     
-    if (!motherduckToken) {
-      throw new Error('MOTHERDUCK_TOKEN not found. Check Vercel integration.');
-    }
-
-    const sqlQuery = `
-      SELECT id, title, release_date, vote_average, popularity
-      FROM ${motherduckDatabase}.movies
-      WHERE release_date LIKE '2025%'
-      ORDER BY vote_average DESC
-      LIMIT 10;
-    `;
-
-    // Try with X-MotherDuck-Token header instead
-    const response = await fetch('https://api.motherduck.com/api/v0/sql', {
-      method: 'POST',
-      headers: {
-        'X-MotherDuck-Token': motherduckToken,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        sql: sqlQuery
-      }),
+    console.log('Environment check:', {
+      hasToken: !!token,
+      databaseName: databaseName
     });
-
-    console.log('Response status:', response.status);
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('MotherDuck API error:', errorText);
-      throw new Error(`MotherDuck API error: ${response.status} ${response.statusText} - ${errorText}`);
+    
+    if (!token) {
+      resolve(NextResponse.json(
+        { error: 'MotherDuck token not found' },
+        { status: 500 }
+      ));
+      return;
     }
 
-    const data = await response.json();
+    console.log('Connecting to MotherDuck...');
     
-    return NextResponse.json(data.data || data);
-  } catch (err) {
-    console.error('Database error:', err);
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Database error' },
-      { status: 500 }
-    );
-  }
+    // Create database with MotherDuck connection string
+    const connectionString = `md:${databaseName}?motherduck_token=${token}`;
+    const db = new Database(connectionString, (err) => {
+      if (err) {
+        console.error('Connection error:', err);
+        resolve(NextResponse.json(
+          { error: `Connection failed: ${err.message}` },
+          { status: 500 }
+        ));
+        return;
+      }
+
+      console.log('Connected, executing query...');
+      
+      const query = `
+        SELECT id, title, release_date, vote_average, popularity 
+        FROM movies 
+        WHERE EXTRACT(YEAR FROM release_date) = 2025 
+        ORDER BY vote_average DESC 
+        LIMIT 10
+      `;
+
+      db.all(query, (err: Error | null, rows: any[]) => {
+        if (err) {
+          console.error('Query error:', err);
+          db.close();
+          resolve(NextResponse.json(
+            { error: `Query failed: ${err.message}` },
+            { status: 500 }
+          ));
+          return;
+        }
+
+        console.log('Query successful, rows:', rows?.length);
+        db.close();
+        resolve(NextResponse.json(rows || []));
+      });
+    });
+  });
 }
