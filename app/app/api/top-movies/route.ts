@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 export async function GET() {
   try {
     const motherduckToken = process.env.MOTHERDUCK_TOKEN;
-    const motherduckDatabase = process.env.MOTHERDUCK_DATABASE || 'tmdb';
+    const motherduckDatabase = process.env.MOTHERDUCK_DATABASE || 'TMDB';
     
     if (!motherduckToken) {
       throw new Error('MOTHERDUCK_TOKEN not found. Check Vercel integration.');
