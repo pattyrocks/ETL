@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 
-// Try edge runtime with fetch-based approach
 export const runtime = 'edge';
 
 export async function GET() {
@@ -12,24 +11,37 @@ export async function GET() {
   }
 
   try {
-    // MotherDuck's SQL API endpoint
-    const res = await fetch(`https://api.motherduck.com/v0/databases/${db}/query`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        sql: `SELECT id::VARCHAR as id, title, release_date, vote_average, popularity 
-              FROM movies 
-              WHERE YEAR(release_date) = 2025 
-              ORDER BY vote_average DESC 
-              LIMIT 10`
-      })
-    });
+    // Alternative: Use token as query parameter
+    const query = encodeURIComponent(`
+      SELECT id::VARCHAR as id, title, release_date, vote_average, popularity 
+      FROM ${db}.movies 
+      WHERE YEAR(release_date) = 2025 
+      ORDER BY vote_average DESC 
+      LIMIT 10
+    `);
+    
+    const res = await fetch(
+      `https://api.motherduck.com/v1/query?token=${token}&query=${query}`,
+      {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+        },
+      }
+    );
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      console.error('MotherDuck API error:', errorText);
+      return NextResponse.json(
+        { error: `API error: ${res.status}`, details: errorText }, 
+        { status: res.status }
+      );
+    }
 
     const data = await res.json();
     return NextResponse.json(data.rows || data);
+    
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
