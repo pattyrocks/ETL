@@ -5,35 +5,47 @@ export async function GET() {
     const motherduckToken = process.env.MOTHERDUCK_TOKEN;
     const motherduckDatabase = process.env.MOTHERDUCK_DATABASE || 'tmdb';
     
+    console.log('Environment check:', {
+      hasToken: !!motherduckToken,
+      database: motherduckDatabase,
+      tokenPrefix: motherduckToken?.substring(0, 10) + '...'
+    });
+    
     if (!motherduckToken) {
       throw new Error('MOTHERDUCK_TOKEN not found. Check Vercel integration.');
     }
 
-    // Use the MotherDuck REST API endpoint provided by the integration
-    const response = await fetch(`https://api.motherduck.com/api/v0/sql`, {
+    const sqlQuery = `
+      SELECT id, title, release_date, vote_average, popularity
+      FROM ${motherduckDatabase}.movies
+      WHERE release_date LIKE '2025%'
+      ORDER BY vote_average DESC
+      LIMIT 10;
+    `;
+
+    console.log('Executing query:', sqlQuery);
+
+    const response = await fetch('https://api.motherduck.com/api/v0/sql', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${motherduckToken}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        sql: `
-          SELECT id, title, release_date, vote_average, popularity
-          FROM ${motherduckDatabase}.movies
-          WHERE release_date LIKE '2025%'
-          ORDER BY vote_average DESC
-          LIMIT 10;
-        `
+        sql: sqlQuery
       }),
     });
+
+    console.log('Response status:', response.status);
 
     if (!response.ok) {
       const errorText = await response.text();
       console.error('MotherDuck API error:', errorText);
-      throw new Error(`MotherDuck API error: ${response.status} ${response.statusText}`);
+      throw new Error(`MotherDuck API error: ${response.status} ${response.statusText} - ${errorText}`);
     }
 
     const data = await response.json();
+    console.log('Success! Row count:', data.data?.length || 0);
     
     return NextResponse.json(data.data || data);
   } catch (err) {
