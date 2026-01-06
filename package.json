@@ -1,4 +1,8 @@
 {
+  "name": "etl",
+  "version": "1.0.0",
+  "description": "ETL scripts for TMDB data",
+  "private": true,
   "dependencies": {
     "duckdb": "^1.4.3"
   }
