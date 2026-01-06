@@ -26,7 +26,7 @@ columns_to_add = [
     "poster_path VARCHAR",
     "production_companies VARCHAR",
     "production_countries VARCHAR",
-    "release_date VARCHAR",
+    "release_date DATE",
     "revenue BIGINT",
     "runtime INTEGER",
     "spoken_languages VARCHAR",

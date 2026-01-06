@@ -1,0 +1,31 @@
+
+> app@0.1.0 dev
+> next dev
+
+   ▲ Next.js 15.5.9
+   - Local:        http://localhost:3000
+   - Network:      http://192.168.68.59:3000
+
+ ✓ Starting...
+ ✓ Ready in 1331ms
+ ○ Compiling / ...
+ ✓ Compiled / in 747ms (628 modules)
+ GET / 200 in 1039ms
+ ✓ Compiled in 321ms (243 modules)
+ ✓ Compiled /movies in 133ms (621 modules)
+ GET /movies 200 in 195ms
+ ✓ Compiled /api/top-movies in 167ms (641 modules)
+Environment check: {
+  hasToken: false,
+  hasDbUrl: true,
+  dbUrl: 'https://api.motherduck.com'
+}
+MotherDuck token (tmdb_MOTHERDUCK_TOKEN) not found in environment variables
+ GET /api/top-movies 500 in 250ms
+Environment check: {
+  hasToken: false,
+  hasDbUrl: true,
+  dbUrl: 'https://api.motherduck.com'
+}
+MotherDuck token (tmdb_MOTHERDUCK_TOKEN) not found in environment variables
+ GET /api/top-movies 500 in 8ms
