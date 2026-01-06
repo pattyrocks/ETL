@@ -5,12 +5,6 @@ export async function GET() {
     const motherduckToken = process.env.MOTHERDUCK_TOKEN;
     const motherduckDatabase = process.env.MOTHERDUCK_DATABASE || 'tmdb';
     
-    console.log('Environment check:', {
-      hasToken: !!motherduckToken,
-      database: motherduckDatabase,
-      tokenPrefix: motherduckToken?.substring(0, 10) + '...'
-    });
-    
     if (!motherduckToken) {
       throw new Error('MOTHERDUCK_TOKEN not found. Check Vercel integration.');
     }
@@ -23,13 +17,11 @@ export async function GET() {
       LIMIT 10;
     `;
 
-    console.log('Executing query:', sqlQuery);
-
-    // Try without "Bearer" prefix - MotherDuck might expect just the token
+    // Try with X-MotherDuck-Token header instead
     const response = await fetch('https://api.motherduck.com/api/v0/sql', {
       method: 'POST',
       headers: {
-        'Authorization': motherduckToken, // Remove "Bearer" prefix
+        'X-MotherDuck-Token': motherduckToken,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -46,7 +38,6 @@ export async function GET() {
     }
 
     const data = await response.json();
-    console.log('Success! Row count:', data.data?.length || 0);
     
     return NextResponse.json(data.data || data);
   } catch (err) {
