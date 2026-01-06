@@ -64,7 +64,7 @@ export async function GET() {
         console.log('Query successful, rows:', rows?.length);
         db.close();
         
-        // Convert BigInt to string for JSON serialization
+        // Use JSON.stringify with BigInt support, then parse back
         const jsonString = JSON.stringify(rows || [], (key, value) =>
           typeof value === 'bigint' ? value.toString() : value
         );
