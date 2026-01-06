@@ -1,71 +1,57 @@
 import { NextResponse } from 'next/server';
-import duckdb from 'duckdb';
+import * as duckdb from '@duckdb/duckdb-wasm';
 
-let dbInstance: duckdb.Database | null = null;
+let dbInstance: duckdb.AsyncDuckDB | null = null;
 
-function getDuckDB(): Promise<duckdb.Database> {
-  return new Promise((resolve, reject) => {
-    if (dbInstance) {
-      resolve(dbInstance);
-      return;
-    }
+async function getDuckDB(): Promise<duckdb.AsyncDuckDB> {
+  if (dbInstance) {
+    return dbInstance;
+  }
 
-    const dbPath = '/Users/patyrocks/Documents/pyground/ETL/TMDB';
-    console.log('Initializing DuckDB at:', dbPath);
-    
-    const db = new duckdb.Database(dbPath, (err) => {
-      if (err) {
-        console.error('Failed to open database:', err);
-        reject(err);
-      } else {
-        console.log('Database opened successfully');
-        dbInstance = db;
-        resolve(db);
-      }
-    });
-  });
+  const motherduckToken = process.env.MOTHERDUCK_DATABASE_TOKEN;
+  if (!motherduckToken) {
+    throw new Error('MOTHERDUCK_DATABASE_TOKEN environment variable is not set');
+  }
+
+  console.log('Connecting to MotherDuck...');
+  
+  const JSDELIVR_BUNDLES = duckdb.getJsDelivrBundles();
+  const bundle = await duckdb.selectBundle(JSDELIVR_BUNDLES);
+  
+  const worker = new Worker(bundle.mainWorker!);
+  const logger = new duckdb.ConsoleLogger();
+  const db = new duckdb.AsyncDuckDB(logger, worker);
+  await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
+  
+  const conn = await db.connect();
+  await conn.query(`SET motherduck_token='${motherduckToken}'`);
+  await conn.close();
+  
+  dbInstance = db;
+  console.log('Connected to MotherDuck successfully');
+  return db;
 }
 
 export async function GET() {
   try {
     const db = await getDuckDB();
+    const conn = await db.connect();
     
-    return new Promise((resolve) => {
-      db.all(
-        `
-        SELECT id, title, release_date, vote_average, popularity
-        FROM movies
-        WHERE release_date LIKE '2025%'
-        ORDER BY vote_average DESC
-        LIMIT 10;
-        `,
-        (err: Error | null, result: any[]) => {
-          if (err) {
-            console.error('Query error:', err);
-            resolve(
-              NextResponse.json(
-                { error: err.message },
-                { status: 500 }
-              )
-            );
-          } else {
-            console.log('Query success, rows:', result?.length || 0);
-            // Serialize with BigInt support
-            const jsonString = JSON.stringify(result, (_, value) =>
-              typeof value === 'bigint' ? value.toString() : value
-            );
-            resolve(
-              new Response(jsonString, {
-                status: 200,
-                headers: { 'Content-Type': 'application/json' },
-              })
-            );
-          }
-        }
-      );
-    });
+    const result = await conn.query(`
+      SELECT id, title, release_date, vote_average, popularity
+      FROM md:your_database_name.movies
+      WHERE release_date LIKE '2025%'
+      ORDER BY vote_average DESC
+      LIMIT 10;
+    `);
+    
+    await conn.close();
+    
+    const rows = result.toArray().map(row => Object.fromEntries(row));
+    
+    return NextResponse.json(rows);
   } catch (err) {
-    console.error('Database initialization error:', err);
+    console.error('Database error:', err);
     return NextResponse.json(
       { error: err instanceof Error ? err.message : 'Database error' },
       { status: 500 }

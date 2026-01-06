@@ -9,10 +9,11 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@duckdb/duckdb-wasm": "^1.33.1-dev16.0",
     "@duckdb/node-api": "^1.4.3-r.2",
+    "@motherduck/wasm-client": "^0.8.1",
     "autoprefixer": "^10.4.23",
     "better-sqlite3": "^12.5.0",
-    "duckdb": "^1.4.3",
     "next": "^16.1.1",
     "pg": "^8.16.3",
     "postcss": "^8.5.6",
