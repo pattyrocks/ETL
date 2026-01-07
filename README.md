@@ -1,12 +1,41 @@
-# 🎬 ETL with Python: TMDB API → DuckDB
+# 🎬 ETL with Python: TMDB API → MotherDuck → Streamlit
 
-This project extracts **all movie and TV show data** from the [TMDB API](https://developer.themoviedb.org/docs), transforms it with pandas, and stores it in a local DuckDB database using analytics-ready schemas. It supports incremental updates, safe repeatable runs, and automated scheduling via GitHub Actions. It is designed to collect comprehensive movie, TV show, cast, and crew information for exploration, visualization, and interactive analysis.
+This project extracts **all movie and TV show data** from the [TMDB API](https://developer.themoviedb.org/docs), transforms it with pandas, and stores it in [MotherDuck](https://motherduck.com/) (cloud-hosted DuckDB) using analytics-ready schemas. A [Streamlit](https://streamlit.io/) dashboard provides interactive data exploration. The pipeline supports incremental updates, timestamped backups, safe repeatable runs, and automated scheduling via GitHub Actions. It is designed to collect comprehensive movie, TV show, cast, and crew information for visualization and analysis.
 
 ---
 
 ## 🧭 Goal
 
 Build a lightweight, ETL process to collect, clean, and store **all movies and TV shows available** on TMDB, along with their main cast and crew data. This will be the resource to a website featuring this data.
+
+---
+
+## 📁 File Structure
+
+```
+ETL/
+├── app/
+│   ├── Home.py                      # Streamlit homepage
+│   └── pages/
+│       └── Top_10_Movies.py         # Top 10 movies page
+├── .github/
+│   └── workflows/
+│       └── weekly_update.yml        # GitHub Actions workflow
+├── .streamlit/
+│   └── secrets.toml                 # Local secrets (gitignored)
+├── adding_movies_ids.py             # Fetch all movie IDs
+├── adding_tv_shows_ids.py           # Fetch all TV show IDs
+├── movies.py                        # Extract movie details
+├── movie_cast.py                    # Extract movie cast
+├── movie_crew.py                    # Extract movie crew
+├── tv_shows.py                      # Extract TV show details
+├── tv_show_cast_crew.py             # Extract TV cast/crew
+├── update_job.py                    # Incremental update job
+├── connection.py                    # DuckDB connection helper
+├── requirements.txt                 # Python dependencies
+├── .gitignore
+└── README.md
+```
 
 ---
 
@@ -21,8 +50,10 @@ Build a lightweight, ETL process to collect, clean, and store **all movies and T
 | `movie_crew.py` | Extracts crew data (e.g. directors, producers) for each movie and stores it in the `movie_crew` table. |
 | `tv_shows.py` | Extracts detailed TV show information and updates the `tv_shows` table. |
 | `tv_show_cast_crew.py` | Fetches aggregate cast and crew data for each TV show (using `/aggregate_credits`) and stores it in the `tv_show_cast_crew` table. |
-| `update_job.py` | Incremental update job that consumes TMDB change feeds, fetches updated movie and TV data, and upserts records into existing tables. |
+| `update_job.py` | Incremental update job that consumes TMDB change feeds, fetches updated movie and TV data, and upserts records into MotherDuck. Creates timestamped backups before each run. |
 | `connection.py` | Centralized DuckDB connection helper used across all ingestion and update scripts. |
+| `app/Home.py` | Streamlit dashboard homepage. |
+| `app/pages/Top_10_Movies.py` | Streamlit page displaying top 10 movies of 2025. |
 | `.github/workflows/weekly_update.yml` | GitHub Actions workflow that runs scheduled or manual pipeline updates (supports dry-run execution). |
 
 ---
@@ -33,6 +64,8 @@ Build a lightweight, ETL process to collect, clean, and store **all movies and T
 - pandas (data transformation)
 - requests (API ingestion)
 - DuckDB (analytical storage)
+- MotherDuck (cloud data warehouse)
+- Streamlit (web dashboard)
 - GitHub Actions (automation / CI)
 - TMDB API
 
@@ -42,11 +75,14 @@ Build a lightweight, ETL process to collect, clean, and store **all movies and T
 
 - TMDB change endpoints are queried
 - Only changed movie and TV IDs are processed
-- Rows are upserted into DuckDB
+- Timestamped backups are created before any changes
+- Rows are upserted into MotherDuck
 - The pipeline is safe to run weekly
 
-Example dry-run:
-python update_job.py --dry-run --sample 10
+Example run with sample:
+```
+python update_job.py --sample 10
+```
 
 ---
 
@@ -61,9 +97,10 @@ python update_job.py --dry-run --sample 10
 ```
    pip install -r requirements.txt  
 ```
-3. Set your TMDB API key as an environment variable:
+3. Set your environment variables:
 ```
    export TMDBAPIKEY=your_api_key  
+   export MOTHERDUCK_TOKEN=your_motherduck_token
 ```
 4. Run the initial full load (first-time setup):
 ```
@@ -79,18 +116,37 @@ python update_job.py --dry-run --sample 10
 ```
    python update_job.py --sample 50  
 ```
-   Optional dry-run preview (no database writes):
-```
-   python update_job.py --dry-run --sample 10  
-```
 6. (Optional) Automated runs:
 
    Incremental updates can also be executed on a schedule using GitHub Actions via
    ```
    .github/workflows/weekly_update.yml
    ```
+
 ---
 
+## 🌐 Running the Dashboard
+
+Start the Streamlit app locally:
+```
+streamlit run app/Home.py
+```
+
+Open [http://localhost:8501](http://localhost:8501) in your browser.
+
+### Deploying to Streamlit Cloud
+
+1. Push your code to GitHub
+2. Go to [share.streamlit.io](https://share.streamlit.io)
+3. Select your repo and branch
+4. Set **Main file path** to `app/Home.py`
+5. In **Advanced settings → Secrets**, add:
+   ```toml
+   MOTHERDUCK_TOKEN = "your_token"
+   ```
+6. Click **Deploy**
+
+---
 
 ## 🗃️ Output Tables
 
@@ -114,11 +170,15 @@ python update_job.py --dry-run --sample 10
   Fields: `tv_id`, `person_id`, `name`, `character`, `roles`, `total_episode_count`, etc.  
   Grain: one row per TV show–person–role
 
+- `last_updates`  
+  Fields: `job_name`, `last_run`  
+  Grain: one row per ETL job
+
 ---
 
 ## 🧪 In Progress
 
-- website creation (**MVP** version)
+- ~~website creation (**MVP** version)~~ ✅ Streamlit dashboard live
 
 ---
 
@@ -137,6 +197,8 @@ python update_job.py --dry-run --sample 10
 
 - [TMDB API Documentation](https://developer.themoviedb.org/docs)
 - [DuckDB Official Website](https://duckdb.org/)
+- [MotherDuck Documentation](https://motherduck.com/docs/)
+- [Streamlit Documentation](https://docs.streamlit.io/)
 
 ---
 
