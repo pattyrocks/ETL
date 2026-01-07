@@ -11,6 +11,7 @@ Pipfile.lock
 TMDB
 TMDB.wal
 .venv
+.streamlit/secrets.toml
 
 # Backup directory
 backups/
