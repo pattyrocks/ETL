@@ -76,12 +76,3 @@ export async function GET() {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
-
-// Package.json scripts
-{
-  "buildCommand": "cd app && npm run build",
-  "devCommand": "cd app && npm run dev",
-  "installCommand": "cd app && npm install",
-  "framework": "nextjs",
-  "outputDirectory": "app/.next"
-}
