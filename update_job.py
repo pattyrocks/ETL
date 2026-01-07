@@ -8,7 +8,8 @@ import math
 import argparse
 
 API_KEY = os.getenv('TMDBAPIKEY')
-DB_PATH = 'TMDB'
+MOTHERDUCK_TOKEN = os.getenv('MOTHERDUCK_TOKEN')
+MOTHERDUCK_DB = 'md:TMDB'
 TMDB_BASE = 'https://api.themoviedb.org/3'
 
 # --- canonical column lists ---
@@ -103,6 +104,36 @@ TV_CAST_COLS = [
     'also_known_as',
 ]
 
+# --- connection helper ---
+def get_connection():
+    """Connect to MotherDuck."""
+    if not MOTHERDUCK_TOKEN:
+        raise ValueError("MOTHERDUCK_TOKEN environment variable not set")
+    return duckdb.connect(f"{MOTHERDUCK_DB}?motherduck_token={MOTHERDUCK_TOKEN}")
+
+# --- backup helper ---
+def create_backups(con, tables):
+    """Create timestamped backups of tables before updating."""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_names = {}
+    
+    for table in tables:
+        backup_name = f"{table}_backup_{timestamp}"
+        try:
+            # Check if table exists and has rows
+            result = con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
+            if result and result[0] > 0:
+                print(f"Creating backup: {backup_name}")
+                con.execute(f"CREATE TABLE {backup_name} AS SELECT * FROM {table}")
+                backup_names[table] = backup_name
+                print(f"✓ Backup created: {backup_name} ({result[0]} rows)")
+            else:
+                print(f"Skipping backup for {table} (empty or doesn't exist)")
+        except Exception as e:
+            print(f"Could not backup {table}: {e}")
+    
+    return backup_names
+
 # --- helpers ---
 def iso_date(dt): return dt.strftime('%Y-%m-%d')
 
@@ -147,9 +178,8 @@ def call_changes(endpoint, start_date, end_date, max_pages=1000):
             if not results or page >= int(total_pages):
                 break
             page += 1
-            time.sleep(0.25)  # small pause to avoid rate limits
+            time.sleep(0.25)
         except requests.exceptions.HTTPError as he:
-            # If rate limited, back off a bit then retry this page once
             status = getattr(he.response, 'status_code', None)
             print(f"HTTPError on changes {endpoint} page {page}: {he} (status {status})")
             if status == 429:
@@ -182,7 +212,6 @@ def fetch_tv_detail_and_aggregate(tv_id):
 
 # --- ensure target tables exist with all columns ---
 def ensure_tables(con):
-    # movies: column cast_order matches MOVIES_COLS, use BIGINT for id, budget, revenue
     con.execute(f"""
         CREATE TABLE IF NOT EXISTS movies (
             id BIGINT PRIMARY KEY,
@@ -214,7 +243,6 @@ def ensure_tables(con):
         );
     """)
 
-    # movie_cast: cast_order matches MOVIE_CAST_COLS, ids as BIGINT
     con.execute(f"""
         CREATE TABLE IF NOT EXISTS movie_cast (
             movie_id BIGINT,
@@ -232,7 +260,6 @@ def ensure_tables(con):
         );
     """)
 
-    # movie_crew: cast_order matches MOVIE_CREW_COLS, ids as BIGINT
     con.execute(f"""
         CREATE TABLE IF NOT EXISTS movie_crew (
             movie_id BIGINT,
@@ -250,7 +277,6 @@ def ensure_tables(con):
         );
     """)
 
-    # tv_shows: cast_order matches TV_SHOWS_COLS, id as BIGINT
     con.execute(f"""
         CREATE TABLE IF NOT EXISTS tv_shows (
             id BIGINT PRIMARY KEY,
@@ -267,7 +293,6 @@ def ensure_tables(con):
         );
     """)
 
-    # tv_show_cast_crew: cast_order matches TV_CAST_COLS, ids as BIGINT
     con.execute(f"""
         CREATE TABLE IF NOT EXISTS tv_show_cast_crew (
             tv_id BIGINT,
@@ -288,36 +313,28 @@ def ensure_tables(con):
         );
     """)
 
-# --- upsert helpers (reindex to canonical cols so all columns are considered) ---
+# --- upsert helpers ---
 def upsert_table_from_rows(con, rows, table_name, canonical_cols, key_col=None):
     """
     Upsert rows (list of dict) into table_name using canonical_cols ordering.
-    Ensures missing canonical columns are created as NULLs, registers a tmp_df
-    with that exact column cast_order and performs delete+insert based on key_col.
     """
     if not rows:
         return
     df = pd.DataFrame(rows)
-    # transform lists/dicts to string to avoid nested type problems
     for c in df.columns:
         df[c] = df[c].apply(lambda v: (str(v) if isinstance(v, (list, dict)) else v))
 
-    # Reindex to canonical columns cast_order, adding missing columns as None
     df_reindexed = df.reindex(columns=canonical_cols, fill_value=None)
 
-    # register and upsert using canonical column order
     con.register('tmp_df', df_reindexed)
     try:
-        # delete existing rows by key if provided
         if key_col and key_col in df_reindexed.columns:
             con.execute(f"DELETE FROM {table_name} WHERE {key_col} IN (SELECT DISTINCT {key_col} FROM tmp_df);")
         else:
-            # try to detect id-like column for deletion
             if any(k in df_reindexed.columns for k in ('id','movie_id','tv_id')):
                 key = 'id' if 'id' in df_reindexed.columns else ('movie_id' if 'movie_id' in df_reindexed.columns else 'tv_id')
                 con.execute(f"DELETE FROM {table_name} WHERE {key} IN (SELECT DISTINCT {key} FROM tmp_df);")
 
-        # build insert column list from canonical_cols (ensures same ordering as movie_crew table)
         insert_cols = ", ".join(canonical_cols)
         con.execute(f"INSERT INTO {table_name} ({insert_cols}) SELECT {insert_cols} FROM tmp_df;")
     finally:
@@ -331,24 +348,29 @@ def _format_seconds(s: float) -> str:
     mins, secs = divmod(rem, 60)
     return f"{int(hrs)}h {int(mins)}m {secs:.2f}s"
 
-def run(dry_run=False, in_memory=False, sample_only=0):
+def run(sample_only=0):
     run_start = time.time()
 
-    # choose DB: in-memory or real
-    db_to_use = ':memory:' if (dry_run or in_memory) else DB_PATH
-    con = duckdb.connect(database=db_to_use, read_only=False)
+    # Connect to MotherDuck
+    con = get_connection()
+    print("✓ Connected to MotherDuck")
 
-    # ensure tables exist when testing in-memory
+    # Ensure tables exist
     ensure_tables(con)
 
-    last_run = get_last_run(con) if not dry_run else (datetime.now(timezone.utc) - timedelta(days=7))
+    # Create backups before any changes
+    print("\n--- Creating backups ---")
+    tables_to_backup = ['movies', 'movie_cast', 'movie_crew', 'tv_shows', 'tv_show_cast_crew']
+    backups = create_backups(con, tables_to_backup)
+    print(f"Backups created: {len(backups)}\n")
+
+    last_run = get_last_run(con)
     now = datetime.now(timezone.utc)
-    print(f"Last run: {last_run.isoformat()}, now: {now.isoformat()} (dry_run={dry_run}, in_memory={in_memory})")
+    print(f"Last run: {last_run.isoformat()}, now: {now.isoformat()}")
 
     movie_ids = call_changes('movie', last_run, now)
     tv_ids = call_changes('tv', last_run, now)
 
-    # apply sampling for quick tests
     if sample_only and sample_only > 0:
         movie_ids = movie_ids[:sample_only]
         tv_ids = tv_ids[:sample_only]
@@ -356,7 +378,7 @@ def run(dry_run=False, in_memory=False, sample_only=0):
     total_changes = len(movie_ids) + len(tv_ids)
     print(f"Found {len(movie_ids)} changed movies, {len(tv_ids)} changed tv shows (total changes: {total_changes})")
 
-    # fetch details phase (time this phase to compute avg per-item)
+    # Fetch details phase
     fetch_start = time.time()
     movies_rows, movie_cast_rows, movie_crew_rows = [], [], []
     processed_movie_count = 0
@@ -440,38 +462,15 @@ def run(dry_run=False, in_memory=False, sample_only=0):
     if sample_only and sample_only > 0 and processed_count < total_changes:
         print(f"Prediction: estimated full fetch time for {total_changes} items is {_format_seconds(predicted_fetch_total)} based on sample")
 
-    # upsert phase (time DB operations)
+    # Upsert phase
     upsert_start = time.time()
-    if dry_run:
-        # preview CSV logic (unchanged)
-        timestamp = now.strftime('%Y%m%dT%H%M%S')
-        if movies_rows:
-            dfm = pd.DataFrame(movies_rows).head(50)
-            dfm = dfm.replace('', pd.NA).fillna('None')
-            dfm.to_csv(f'/tmp/update_job_movies_preview_{timestamp}.csv', index=False, na_rep='None')
-        if movie_cast_rows:
-            dfc = pd.DataFrame(movie_cast_rows).head(200)
-            dfc = dfc.replace('', pd.NA).fillna('None')
-            dfc.to_csv(f'/tmp/update_job_movie_cast_preview_{timestamp}.csv', index=False, na_rep='None')
-        if movie_crew_rows:
-            dfcr = pd.DataFrame(movie_crew_rows).head(200)
-            dfcr = dfcr.replace('', pd.NA).fillna('None')
-            dfcr.to_csv(f'/tmp/update_job_movie_crew_preview_{timestamp}.csv', index=False, na_rep='None')
-        if tv_rows:
-            dftv = pd.DataFrame(tv_rows).head(50)
-            dftv = dftv.replace('', pd.NA).fillna('None')
-            dftv.to_csv(f'/tmp/update_job_tv_preview_{timestamp}.csv', index=False, na_rep='None')
-        if tv_cast_rows:
-            dftvc = pd.DataFrame(tv_cast_rows).head(200)
-            dftvc = dftvc.replace('', pd.NA).fillna('None')
-            dftvc.to_csv(f'/tmp/update_job_tv_cast_preview_{timestamp}.csv', index=False, na_rep='None')
-    else:
-        upsert_table_from_rows(con, movies_rows, 'movies', MOVIES_COLS, key_col='id')
-        upsert_table_from_rows(con, movie_cast_rows, 'movie_cast', MOVIE_CAST_COLS, key_col='movie_id')
-        upsert_table_from_rows(con, movie_crew_rows, 'movie_crew', MOVIE_CREW_COLS, key_col='movie_id')
-        upsert_table_from_rows(con, tv_rows, 'tv_shows', TV_SHOWS_COLS, key_col='id')
-        upsert_table_from_rows(con, tv_cast_rows, 'tv_show_cast_crew', TV_CAST_COLS, key_col='tv_id')
-        set_last_run(con, now)
+    
+    upsert_table_from_rows(con, movies_rows, 'movies', MOVIES_COLS, key_col='id')
+    upsert_table_from_rows(con, movie_cast_rows, 'movie_cast', MOVIE_CAST_COLS, key_col='movie_id')
+    upsert_table_from_rows(con, movie_crew_rows, 'movie_crew', MOVIE_CREW_COLS, key_col='movie_id')
+    upsert_table_from_rows(con, tv_rows, 'tv_shows', TV_SHOWS_COLS, key_col='id')
+    upsert_table_from_rows(con, tv_cast_rows, 'tv_show_cast_crew', TV_CAST_COLS, key_col='tv_id')
+    set_last_run(con, now)
 
     upsert_end = time.time()
     upsert_elapsed = upsert_end - upsert_start
@@ -479,7 +478,6 @@ def run(dry_run=False, in_memory=False, sample_only=0):
     run_end = time.time()
     total_elapsed = run_end - run_start
 
-    # final prints: actual run time and prediction (if sample was used)
     print(f"DB upsert phase took {_format_seconds(upsert_elapsed)}")
     print(f"Total run time: {_format_seconds(total_elapsed)}")
 
@@ -488,12 +486,11 @@ def run(dry_run=False, in_memory=False, sample_only=0):
         print(f"Estimated total run time for full dataset ({total_changes} items): {_format_seconds(estimated_total_run)} (based on sample)")
 
     con.close()
+    print("\n✓ Update complete!")
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='TMDB weekly update job')
-    parser.add_argument('--dry-run', action='store_true', help='Do not write to production DB; save preview CSVs to /tmp')
-    parser.add_argument('--in-memory', action='store_true', help='Run against an in-memory DuckDB (no disk writes)')
     parser.add_argument('--sample', type=int, default=0, help='Process only N changed ids (movies and tv) for quick testing')
     args = parser.parse_args()
 
-    run(dry_run=args.dry_run, in_memory=args.in_memory, sample_only=args.sample)
+    run(sample_only=args.sample)

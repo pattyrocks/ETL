@@ -16,3 +16,5 @@ TMDB.wal
 # Backup directory
 backups/
 *.backup
+
+.streamlit/secrets.toml
