@@ -18,3 +18,10 @@ Use the sidebar to navigate:
 
 st.markdown("---")
 st.caption("Data sourced from TMDB API")
+
+# Footer
+st.markdown("---")
+st.markdown(
+    "<div style='text-align: left; color: grey;'>Made by <a href='https://github.com/pattyrocks' target='_blank'>patyrocks</a> 👩🏽‍💻</div>",
+    unsafe_allow_html=True
+)
