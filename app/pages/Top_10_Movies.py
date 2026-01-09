@@ -27,7 +27,7 @@ try:
             popularity,
             vote_count,
             vote_average,
-            vote_count * POWER(vote_average, 2) AS score
+            SQRT(vote_count) * POWER(vote_average, 4) AS score
         FROM movies
         WHERE release_date >= '2025-01-01' AND release_date < '2026-01-01'
         ORDER BY score DESC, popularity DESC
@@ -54,8 +54,7 @@ try:
             hide_index=True,
             use_container_width=True
         )
-        st.caption("Rank based on score: number of votes * average rating 🏆👏🏽")
-        st.caption("Rank based on score: number of votes × (average rating²)")
+        st.caption("Rank based on score: sqrt(number of votes) × (average rating⁴)")
 
 except Exception as e:
     st.error(f"Could not connect to MotherDuck: {e}")
