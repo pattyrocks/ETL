@@ -54,7 +54,7 @@ try:
             hide_index=True,
             use_container_width=True
         )
-        st.caption("Rank based on score: number of votes * average rating 🏆👏🏽")
+        st.caption("Rank based on score: number of votes * average rating")
 
 except Exception as e:
     st.error(f"Could not connect to MotherDuck: {e}")
