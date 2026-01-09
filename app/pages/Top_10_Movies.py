@@ -8,8 +8,8 @@ st.set_page_config(
     layout="centered"
 )
 
-st.title("🏆 Top 10 Movies of 2025")
-st.markdown("---")
+st.title("🏆🏆 Top 10 Movies of 2025")
+st.markdown("----")
 
 # Get MotherDuck token from Streamlit secrets or environment
 try:
