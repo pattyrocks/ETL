@@ -368,9 +368,11 @@ def upsert_table_from_rows(con, rows, table_name, canonical_cols, key_col=None):
         # Insert with preserved inserted_at (COALESCE to keep old value) and new updated_at
         insert_cols = ", ".join(canonical_cols)
         if key:
+            # Qualify ambiguous columns in SELECT
+            qualified_insert_cols = ", ".join([f"t.{col}" for col in canonical_cols])
             con.execute(f"""
                 INSERT INTO {table_name} ({insert_cols}, inserted_at, updated_at)
-                SELECT {insert_cols},
+                SELECT {qualified_insert_cols},
                        COALESCE(o.inserted_at, CURRENT_TIMESTAMP) AS inserted_at,
                        CURRENT_TIMESTAMP AS updated_at
                 FROM tmp_df t
