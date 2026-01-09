@@ -27,7 +27,7 @@ try:
             popularity,
             vote_count,
             vote_average,
-            SQRT(vote_count) * gamma(vote_average + 1) AS score
+            vote_count * gamma(vote_average + 1) AS score
         FROM movies
         WHERE release_date >= '2025-01-01' AND release_date < '2026-01-01'
         ORDER BY score DESC, popularity DESC
