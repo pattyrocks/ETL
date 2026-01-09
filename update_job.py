@@ -355,7 +355,20 @@ def upsert_table_from_rows(con, rows, table_name, canonical_cols, key_col=None, 
                 return None
         df['release_date'] = df['release_date'].apply(clean_release_date)
 
+
     df_reindexed = df.reindex(columns=canonical_cols, fill_value=None)
+
+    # Final clean for movies: ensure no empty/invalid release_date in df_reindexed
+    if table_name == 'movies' and 'release_date' in df_reindexed.columns:
+        def final_clean_release_date(val):
+            if val in (None, "", pd.NA):
+                return None
+            try:
+                pd.to_datetime(val, format="%Y-%m-%d", errors="raise")
+                return val
+            except Exception:
+                return None
+        df_reindexed['release_date'] = df_reindexed['release_date'].apply(final_clean_release_date)
 
     # Determine the key column
     if key_col and key_col in df_reindexed.columns:
