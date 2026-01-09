@@ -50,11 +50,11 @@ try:
                 "vote_count": st.column_config.NumberColumn("Votes", format="%d"),
                 "vote_average": st.column_config.NumberColumn("Rating", format="%.1f ⭐"),
                 "score": st.column_config.NumberColumn("Score", format="%.1f ⬇️")
-            },👏🏽
+                },
             hide_index=True,
             use_container_width=True
         )
-        st.caption("Rank based on score: number of votes * average rating")
+        st.caption("Rank based on score: number of votes * average rating 🏆👏🏽")
 
 except Exception as e:
     st.error(f"Could not connect to MotherDuck: {e}")
