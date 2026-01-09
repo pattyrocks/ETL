@@ -123,7 +123,7 @@ def create_credits():
 
     try:
         con.execute(f"""
-        CREATE OR REPLACE TABLE movie_crew (
+        CREATE TABLE IF NOT EXISTS movie_crew (
                 movie_id BIGINT,              
                 person_id BIGINT,             
                 name VARCHAR,                 
@@ -135,9 +135,15 @@ def create_credits():
                 original_name VARCHAR,        
                 adult BOOLEAN,                
                 department VARCHAR,           
-                job VARCHAR                   
+                job VARCHAR,
+                inserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP                   
         );
         """)
+
+        # Add inserted_at and updated_at columns to existing table (idempotent)
+        con.execute("ALTER TABLE movie_crew ADD COLUMN IF NOT EXISTS inserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;")
+        con.execute("ALTER TABLE movie_crew ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;")
         print("Created/Replaced 'movie_crew' table with the specified schema.")
 
         columns_to_insert = [

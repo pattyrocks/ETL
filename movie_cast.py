@@ -116,7 +116,7 @@ def create_credits():
 
     try:
         con.execute(f"""
-        CREATE OR REPLACE TABLE movie_cast (
+        CREATE TABLE IF NOT EXISTS movie_cast (
             movie_id BIGINT,
             person_id BIGINT,
             name VARCHAR,
@@ -128,13 +128,21 @@ def create_credits():
             known_for_department VARCHAR,
             popularity DOUBLE,
             original_name VARCHAR,
-            cast_id BIGINT
+            cast_id BIGINT,
+            inserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         """)
 
+        # Add inserted_at and updated_at columns to existing table (idempotent)
+        con.execute("ALTER TABLE movie_cast ADD COLUMN IF NOT EXISTS inserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;")
+        con.execute("ALTER TABLE movie_cast ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;")
+
+        cast_columns = 'movie_id, person_id, name, credit_id, character, cast_order, gender, profile_path, known_for_department, popularity, original_name, cast_id'
+
         if DB_INSERT_BATCH_SIZE is None or len(cast_df) <= DB_INSERT_BATCH_SIZE:
             # Insert all at once if no batching is specified or DataFrame is small
-            con.execute("INSERT INTO movie_cast SELECT * FROM cast_df;")
+            con.execute(f"INSERT INTO movie_cast ({cast_columns}) SELECT {cast_columns} FROM cast_df;")
             print(f"Inserted all {len(cast_df)} rows into 'movie_cast'.")
         else:
             # Batch insert if DataFrame is extremely large
@@ -145,7 +153,7 @@ def create_credits():
                 end_idx = min((i + 1) * DB_INSERT_BATCH_SIZE, len(cast_df))
                 batch_df = cast_df.iloc[start_idx:end_idx]
 
-                con.execute("INSERT INTO movie_cast SELECT * FROM batch_df;") # DuckDB will see batch_df
+                con.execute(f"INSERT INTO movie_cast ({cast_columns}) SELECT {cast_columns} FROM batch_df;") # DuckDB will see batch_df
                 print(f"Batch {i+1}/{num_batches} inserted ({len(batch_df)} rows).")
 
     except Exception as e:
