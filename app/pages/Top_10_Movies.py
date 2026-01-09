@@ -26,7 +26,8 @@ try:
             release_date,
             popularity,
             vote_count,
-            vote_average
+            vote_average,
+            vote_count * vote_average AS score
         FROM movies
         WHERE release_date >= '2025-01-01' AND release_date < '2026-01-01'
         ORDER BY vote_count * vote_average DESC, popularity DESC
@@ -47,11 +48,13 @@ try:
                 "release_date": "Release Date",
                 "popularity": st.column_config.NumberColumn("Popularity", format="%.1f"),
                 "vote_count": st.column_config.NumberColumn("Votes", format="%d"),
-                "vote_average": st.column_config.NumberColumn("Rating", format="%.1f ⭐")
-            },
+                "vote_average": st.column_config.NumberColumn("Rating", format="%.1f ⭐"),
+                "score": st.column_config.NumberColumn("Score", format="%.1f ⬇️")
+            },👏🏽
             hide_index=True,
             use_container_width=True
         )
+        st.caption("Rank based on score: number of votes * average rating 🏆👏🏽")
 
 except Exception as e:
     st.error(f"Could not connect to MotherDuck: {e}")
