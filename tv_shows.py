@@ -22,9 +22,15 @@ con.execute('''
         origin_country VARCHAR[],
         production_countries VARCHAR,
         status VARCHAR,
-        type VARCHAR
+        type VARCHAR,
+        inserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 ''')
+
+# Add inserted_at and updated_at columns to existing table (idempotent)
+con.execute("ALTER TABLE tv_shows ADD COLUMN IF NOT EXISTS inserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;")
+con.execute("ALTER TABLE tv_shows ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;")
 
 processed_count = 0
 skipped_ids = []
@@ -109,7 +115,8 @@ def add_info_to_tv_shows_parallel(max_workers=8):
                         origin_country = selected_df.origin_country,
                         production_countries = selected_df.production_countries,
                         status = selected_df.status,
-                        type = selected_df.type
+                        type = selected_df.type,
+                        updated_at = CURRENT_TIMESTAMP
                     FROM selected_df
                     WHERE tv_shows.id = selected_df.id
                 ''')

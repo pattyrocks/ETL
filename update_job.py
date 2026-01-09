@@ -138,7 +138,7 @@ def create_backups(con, tables):
 def iso_date(dt): return dt.strftime('%Y-%m-%d')
 
 def get_last_run(con, job_name='weekly_update'):
-    con.execute('CREATE TABLE IF NOT EXISTS last_updates (job_name VARCHAR PRIMARY KEY, last_run TIMESTAMP);')
+    con.execute('CREATE TABLE IF NOT EXISTS last_updates (job_name VARCHAR PRIMARY KEY, last_run TIMESTAMP, inserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);')
     row = con.execute("SELECT last_run FROM last_updates WHERE job_name = ?;", [job_name]).fetchone()
     if row and row[0] is not None:
         try:
@@ -239,7 +239,9 @@ def ensure_tables(con):
             status VARCHAR,
             tagline VARCHAR,
             video BOOLEAN,
-            vote_average DOUBLE
+            vote_average DOUBLE,
+            inserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     """)
 
@@ -256,7 +258,9 @@ def ensure_tables(con):
             known_for_department VARCHAR,
             popularity DOUBLE,
             original_name VARCHAR,
-            cast_id BIGINT
+            cast_id BIGINT,
+            inserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     """)
 
@@ -273,7 +277,9 @@ def ensure_tables(con):
             original_name VARCHAR,
             adult BOOLEAN,
             department VARCHAR,
-            job VARCHAR
+            job VARCHAR,
+            inserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     """)
 
@@ -289,7 +295,9 @@ def ensure_tables(con):
             origin_country VARCHAR,
             production_countries VARCHAR,
             status VARCHAR,
-            type VARCHAR
+            type VARCHAR,
+            inserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     """)
 
@@ -309,14 +317,22 @@ def ensure_tables(con):
             roles VARCHAR,
             total_episode_count INTEGER,
             cast_id BIGINT,
-            also_known_as VARCHAR
+            also_known_as VARCHAR,
+            inserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     """)
+
+    # Add inserted_at and updated_at columns to existing tables (idempotent)
+    for table in ['movies', 'movie_cast', 'movie_crew', 'tv_shows', 'tv_show_cast_crew', 'last_updates']:
+        con.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS inserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;")
+        con.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;")
 
 # --- upsert helpers ---
 def upsert_table_from_rows(con, rows, table_name, canonical_cols, key_col=None):
     """
     Upsert rows (list of dict) into table_name using canonical_cols ordering.
+    Preserves inserted_at from existing rows, sets updated_at to current timestamp.
     """
     if not rows:
         return
@@ -326,20 +342,49 @@ def upsert_table_from_rows(con, rows, table_name, canonical_cols, key_col=None):
 
     df_reindexed = df.reindex(columns=canonical_cols, fill_value=None)
 
+    # Determine the key column
+    if key_col and key_col in df_reindexed.columns:
+        key = key_col
+    elif 'id' in df_reindexed.columns:
+        key = 'id'
+    elif 'movie_id' in df_reindexed.columns:
+        key = 'movie_id'
+    elif 'tv_id' in df_reindexed.columns:
+        key = 'tv_id'
+    else:
+        key = None
+
     con.register('tmp_df', df_reindexed)
     try:
-        if key_col and key_col in df_reindexed.columns:
-            con.execute(f"DELETE FROM {table_name} WHERE {key_col} IN (SELECT DISTINCT {key_col} FROM tmp_df);")
-        else:
-            if any(k in df_reindexed.columns for k in ('id','movie_id','tv_id')):
-                key = 'id' if 'id' in df_reindexed.columns else ('movie_id' if 'movie_id' in df_reindexed.columns else 'tv_id')
-                con.execute(f"DELETE FROM {table_name} WHERE {key} IN (SELECT DISTINCT {key} FROM tmp_df);")
+        # Preserve old inserted_at values before delete
+        if key:
+            con.execute(f"""
+                CREATE OR REPLACE TEMP TABLE old_inserted_at AS
+                SELECT {key}, inserted_at FROM {table_name}
+                WHERE {key} IN (SELECT DISTINCT {key} FROM tmp_df);
+            """)
+            con.execute(f"DELETE FROM {table_name} WHERE {key} IN (SELECT DISTINCT {key} FROM tmp_df);")
 
+        # Insert with preserved inserted_at (COALESCE to keep old value) and new updated_at
         insert_cols = ", ".join(canonical_cols)
-        con.execute(f"INSERT INTO {table_name} ({insert_cols}) SELECT {insert_cols} FROM tmp_df;")
+        if key:
+            con.execute(f"""
+                INSERT INTO {table_name} ({insert_cols}, inserted_at, updated_at)
+                SELECT {insert_cols},
+                       COALESCE(o.inserted_at, CURRENT_TIMESTAMP) AS inserted_at,
+                       CURRENT_TIMESTAMP AS updated_at
+                FROM tmp_df t
+                LEFT JOIN old_inserted_at o ON t.{key} = o.{key};
+            """)
+        else:
+            con.execute(f"INSERT INTO {table_name} ({insert_cols}, inserted_at, updated_at) SELECT {insert_cols}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP FROM tmp_df;")
     finally:
         try:
             con.unregister('tmp_df')
+        except Exception:
+            pass
+        try:
+            con.execute("DROP TABLE IF EXISTS old_inserted_at;")
         except Exception:
             pass
 
