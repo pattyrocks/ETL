@@ -329,10 +329,11 @@ def ensure_tables(con):
         con.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;")
 
 # --- upsert helpers ---
-def upsert_table_from_rows(con, rows, table_name, canonical_cols, key_col=None):
+def upsert_table_from_rows(con, rows, table_name, canonical_cols, key_col=None, dry_run=False):
     """
     Upsert rows (list of dict) into table_name using canonical_cols ordering.
     Preserves inserted_at from existing rows, sets updated_at to current timestamp.
+    If dry_run is True, print what would be done and skip DB writes.
     """
     if not rows:
         return
@@ -353,6 +354,10 @@ def upsert_table_from_rows(con, rows, table_name, canonical_cols, key_col=None):
         key = 'tv_id'
     else:
         key = None
+
+    if dry_run:
+        print(f"[DRY RUN] Would upsert {len(df_reindexed)} rows into {table_name}.")
+        return
 
     con.register('tmp_df', df_reindexed)
     try:
@@ -395,7 +400,7 @@ def _format_seconds(s: float) -> str:
     mins, secs = divmod(rem, 60)
     return f"{int(hrs)}h {int(mins)}m {secs:.2f}s"
 
-def run(sample_only=0):
+def run(sample_only=0, force_days=None, dry_run=False):
     run_start = time.time()
 
     # Connect to MotherDuck
@@ -405,13 +410,21 @@ def run(sample_only=0):
     # Ensure tables exist
     ensure_tables(con)
 
-    # Create backups before any changes
-    print("\n--- Creating backups ---")
-    tables_to_backup = ['movies', 'movie_cast', 'movie_crew', 'tv_shows', 'tv_show_cast_crew']
-    backups = create_backups(con, tables_to_backup)
-    print(f"Backups created: {len(backups)}\n")
+    if dry_run:
+        print("\n--- DRY RUN: No database writes will be performed ---")
+    else:
+        # Create backups before any changes
+        print("\n--- Creating backups ---")
+        tables_to_backup = ['movies', 'movie_cast', 'movie_crew', 'tv_shows', 'tv_show_cast_crew']
+        backups = create_backups(con, tables_to_backup)
+        print(f"Backups created: {len(backups)}\n")
 
-    last_run = get_last_run(con)
+    # Determine last_run
+    if force_days is not None:
+        last_run = datetime.now(timezone.utc) - timedelta(days=force_days)
+        print(f"Forcing update: fetching changes from last {force_days} days")
+    else:
+        last_run = get_last_run(con)
     now = datetime.now(timezone.utc)
     print(f"Last run: {last_run.isoformat()}, now: {now.isoformat()}")
 
@@ -512,12 +525,15 @@ def run(sample_only=0):
     # Upsert phase
     upsert_start = time.time()
     
-    upsert_table_from_rows(con, movies_rows, 'movies', MOVIES_COLS, key_col='id')
-    upsert_table_from_rows(con, movie_cast_rows, 'movie_cast', MOVIE_CAST_COLS, key_col='movie_id')
-    upsert_table_from_rows(con, movie_crew_rows, 'movie_crew', MOVIE_CREW_COLS, key_col='movie_id')
-    upsert_table_from_rows(con, tv_rows, 'tv_shows', TV_SHOWS_COLS, key_col='id')
-    upsert_table_from_rows(con, tv_cast_rows, 'tv_show_cast_crew', TV_CAST_COLS, key_col='tv_id')
-    set_last_run(con, now)
+    upsert_table_from_rows(con, movies_rows, 'movies', MOVIES_COLS, key_col='id', dry_run=dry_run)
+    upsert_table_from_rows(con, movie_cast_rows, 'movie_cast', MOVIE_CAST_COLS, key_col='movie_id', dry_run=dry_run)
+    upsert_table_from_rows(con, movie_crew_rows, 'movie_crew', MOVIE_CREW_COLS, key_col='movie_id', dry_run=dry_run)
+    upsert_table_from_rows(con, tv_rows, 'tv_shows', TV_SHOWS_COLS, key_col='id', dry_run=dry_run)
+    upsert_table_from_rows(con, tv_cast_rows, 'tv_show_cast_crew', TV_CAST_COLS, key_col='tv_id', dry_run=dry_run)
+    if not dry_run:
+        set_last_run(con, now)
+    else:
+        print("[DRY RUN] Would update last_run in DB.")
 
     upsert_end = time.time()
     upsert_elapsed = upsert_end - upsert_start
@@ -538,6 +554,9 @@ def run(sample_only=0):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='TMDB weekly update job')
     parser.add_argument('--sample', type=int, default=0, help='Process only N changed ids (movies and tv) for quick testing')
+    parser.add_argument('--force', type=int, default=None, metavar='DAYS',
+                        help='Ignore stored last_run and fetch changes from DAYS ago (e.g., --force 30 for last 30 days, --force 7 for last week)')
+    parser.add_argument('--dry-run', action='store_true', help='Run without writing to the database (for manual testing)')
     args = parser.parse_args()
 
-    run(sample_only=args.sample)
+    run(sample_only=args.sample, force_days=args.force, dry_run=args.dry_run)
