@@ -29,7 +29,7 @@ try:
             vote_average
         FROM movies
         WHERE release_date >= '2025-01-01' AND release_date < '2026-01-01'
-        ORDER BY vote_count DESC, vote_average DESC, popularity DESC
+        ORDER BY vote_count * vote_average DESC, popularity DESC
         LIMIT 10
     """
     
