@@ -358,17 +358,24 @@ def upsert_table_from_rows(con, rows, table_name, canonical_cols, key_col=None, 
 
     df_reindexed = df.reindex(columns=canonical_cols, fill_value=None)
 
-    # Final clean for movies: ensure no empty/invalid release_date in df_reindexed
+
+    # Clean date columns for all tables
+    def clean_date(val):
+        if val in (None, "", pd.NA):
+            return None
+        try:
+            pd.to_datetime(val, format="%Y-%m-%d", errors="raise")
+            return val
+        except Exception:
+            return None
+
     if table_name == 'movies' and 'release_date' in df_reindexed.columns:
-        def final_clean_release_date(val):
-            if val in (None, "", pd.NA):
-                return None
-            try:
-                pd.to_datetime(val, format="%Y-%m-%d", errors="raise")
-                return val
-            except Exception:
-                return None
-        df_reindexed['release_date'] = df_reindexed['release_date'].apply(final_clean_release_date)
+        df_reindexed['release_date'] = df_reindexed['release_date'].apply(clean_date)
+
+    if table_name == 'tv_shows':
+        if 'last_air_date' in df_reindexed.columns:
+            df_reindexed['last_air_date'] = df_reindexed['last_air_date'].apply(clean_date)
+        # episode_run_time is usually a list or int, not a date, so skip unless you confirm it's a date
 
     # Determine the key column
     if key_col and key_col in df_reindexed.columns:
