@@ -337,9 +337,23 @@ def upsert_table_from_rows(con, rows, table_name, canonical_cols, key_col=None, 
     """
     if not rows:
         return
+
     df = pd.DataFrame(rows)
     for c in df.columns:
         df[c] = df[c].apply(lambda v: (str(v) if isinstance(v, (list, dict)) else v))
+
+    # Special handling for movies: convert empty or invalid release_date to None
+    if table_name == 'movies' and 'release_date' in df.columns:
+        def clean_release_date(val):
+            if val in (None, "", pd.NA):
+                return None
+            try:
+                # Accepts YYYY-MM-DD, returns as is if valid
+                pd.to_datetime(val, format="%Y-%m-%d", errors="raise")
+                return val
+            except Exception:
+                return None
+        df['release_date'] = df['release_date'].apply(clean_release_date)
 
     df_reindexed = df.reindex(columns=canonical_cols, fill_value=None)
 
