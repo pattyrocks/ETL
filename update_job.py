@@ -333,7 +333,7 @@ def upsert_table_from_rows(con, rows, table_name, canonical_cols, key_col=None, 
     """
     Upsert rows (list of dict) into table_name using canonical_cols ordering.
     Preserves inserted_at from existing rows, sets updated_at to current timestamp.
-    If dry_run is True, print what would be done and skip DB writes.
+    If dry_run is True, print what would be done, skip DB writes, and write a summary CSV preview.
     """
     if not rows:
         return
@@ -357,6 +357,23 @@ def upsert_table_from_rows(con, rows, table_name, canonical_cols, key_col=None, 
 
     if dry_run:
         print(f"[DRY RUN] Would upsert {len(df_reindexed)} rows into {table_name}.")
+        # Write summary CSV preview
+        import csv
+        import tempfile
+        from datetime import datetime
+        preview_path = f"/tmp/update_job_{table_name}_preview_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        with open(preview_path, "w", newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([f"Table: {table_name}"])
+            writer.writerow([f"Row count: {len(df_reindexed)}"])
+            writer.writerow(["Columns:"] + list(df_reindexed.columns))
+            writer.writerow([])
+            writer.writerow(["Sample rows (up to 10):"])
+            sample = df_reindexed.head(10)
+            writer.writerow(list(sample.columns))
+            for row in sample.itertuples(index=False):
+                writer.writerow(list(row))
+        print(f"[DRY RUN] Preview CSV written: {preview_path}")
         return
 
     con.register('tmp_df', df_reindexed)
