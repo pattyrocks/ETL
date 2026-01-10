@@ -413,12 +413,13 @@ def upsert_table_from_rows(con, rows, table_name, canonical_cols, key_col=None, 
     try:
         # Preserve old inserted_at values before delete
         if key:
+            # Qualify key column for all SQL statements
             con.execute(f"""
                 CREATE OR REPLACE TEMP TABLE old_inserted_at AS
-                SELECT {key}, inserted_at FROM {table_name}
-                WHERE {key} IN (SELECT DISTINCT {key} FROM tmp_df);
+                SELECT o.{key}, o.inserted_at FROM {table_name} o
+                WHERE o.{key} IN (SELECT DISTINCT t.{key} FROM tmp_df t);
             """)
-            con.execute(f"DELETE FROM {table_name} WHERE {key} IN (SELECT DISTINCT {key} FROM tmp_df);")
+            con.execute(f"DELETE FROM {table_name} WHERE {key} IN (SELECT DISTINCT t.{key} FROM tmp_df t);")
 
         # Insert with preserved inserted_at (COALESCE to keep old value) and new updated_at
         insert_cols = ", ".join(canonical_cols)
