@@ -345,7 +345,7 @@ def upsert_table_from_rows(con, rows, table_name, canonical_cols, key_col=None, 
     # Special handling for movies: convert empty or invalid release_date to None
     if table_name == 'movies' and 'release_date' in df.columns:
         def clean_release_date(val):
-            if val in (None, "", pd.NA):
+            if pd.isna(val) or val == "":
                 return None
             try:
                 # Accepts YYYY-MM-DD, returns as is if valid
@@ -361,13 +361,8 @@ def upsert_table_from_rows(con, rows, table_name, canonical_cols, key_col=None, 
 
     # Clean date columns for all tables (after reindexing)
     def clean_date(val):
-        if val is None or val == "" or val is pd.NA:
+        if pd.isna(val) or val == "":
             return None
-        try:
-            if pd.isna(val):
-                return None
-        except Exception:
-            pass
         try:
             pd.to_datetime(val, format="%Y-%m-%d", errors="raise")
             return val
