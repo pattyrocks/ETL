@@ -359,10 +359,15 @@ def upsert_table_from_rows(con, rows, table_name, canonical_cols, key_col=None, 
     df_reindexed = df.reindex(columns=canonical_cols, fill_value=None)
 
 
-    # Clean date columns for all tables
+    # Clean date columns for all tables (after reindexing)
     def clean_date(val):
-        if val in (None, "", pd.NA):
+        if val is None or val == "" or val is pd.NA:
             return None
+        try:
+            if pd.isna(val):
+                return None
+        except Exception:
+            pass
         try:
             pd.to_datetime(val, format="%Y-%m-%d", errors="raise")
             return val
@@ -375,7 +380,6 @@ def upsert_table_from_rows(con, rows, table_name, canonical_cols, key_col=None, 
     if table_name == 'tv_shows':
         if 'last_air_date' in df_reindexed.columns:
             df_reindexed['last_air_date'] = df_reindexed['last_air_date'].apply(clean_date)
-        # episode_run_time is usually a list or int, not a date, so skip unless you confirm it's a date
 
     # Determine the key column
     if key_col and key_col in df_reindexed.columns:
