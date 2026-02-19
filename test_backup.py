@@ -225,6 +225,55 @@ def compare_with_current():
     except Exception as e:
         print(f"Error comparing databases: {e}")
 
+def check_motherduck_backup_tables():
+    """Inspect in-DB backup tables directly in MotherDuck."""
+    print(f"\n{'='*60}")
+    print("CHECKING IN-DB BACKUP TABLES IN MOTHERDUCK")
+    print(f"{'='*60}")
+
+    try:
+        con = get_motherduck_connection()
+        print("✓ Connected to md:TMDB\n")
+
+        # Find all backup tables
+        all_tables = con.execute("""
+            SELECT table_name
+            FROM information_schema.tables
+            WHERE table_schema = 'main'
+            ORDER BY table_name
+        """).fetchall()
+
+        backup_tables = [t[0] for t in all_tables if '_backup_' in t[0]]
+        live_tables = [t[0] for t in all_tables if '_backup_' not in t[0]]
+
+        # Print live table counts
+        print(f"{'LIVE TABLES':<35} {'Rows':>12}")
+        print("-" * 50)
+        for table in live_tables:
+            try:
+                count = con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                print(f"{table:<35} {count:>12,}")
+            except Exception as e:
+                print(f"{table:<35} {'ERROR':>12}")
+
+        # Print backup table counts
+        print(f"\n{'BACKUP TABLES':<35} {'Rows':>12}")
+        print("-" * 50)
+        if not backup_tables:
+            print("No backup tables found.")
+        for table in backup_tables:
+            try:
+                count = con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                status = "⚠ EMPTY" if count == 0 else "✓"
+                print(f"{table:<35} {count:>12,}  {status}")
+            except Exception as e:
+                print(f"{table:<35} {'ERROR':>12}")
+
+        con.close()
+
+    except Exception as e:
+        print(f"Error connecting to MotherDuck: {e}")
+
 # Main menu
 if __name__ == "__main__":
     print("=" * 60)
@@ -241,9 +290,10 @@ if __name__ == "__main__":
     print("\nOptions:")
     print("1. Test a specific backup")
     print("2. Compare backup with live MotherDuck database")
-    print("3. Exit")
+    print("3. Check in-DB backup tables in MotherDuck")
+    print("4. Exit")  
 
-    choice = input("\nEnter choice (1-3): ").strip()
+    choice = input("\nEnter choice (1-4): ").strip()
 
     if choice == '1':
         print("\nSelect backup to test:")
@@ -263,7 +313,9 @@ if __name__ == "__main__":
     elif choice == '2':
         compare_with_current()
 
-    elif choice == '3':
+    elif choice == '3':            
+        check_motherduck_backup_tables() 
+    elif choice == '4':                                
         print("Exiting...")
 
     else:

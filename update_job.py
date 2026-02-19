@@ -113,29 +113,6 @@ def get_connection():
         raise ValueError("MOTHERDUCK_TOKEN environment variable not set")
     return duckdb.connect(f"{MOTHERDUCK_DB}?motherduck_token={MOTHERDUCK_TOKEN}")
 
-# --- backup helper ---
-def create_backups(con, tables):
-    """Create timestamped backups of tables before updating."""
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    backup_names = {}
-    
-    for table in tables:
-        backup_name = f"{table}_backup_{timestamp}"
-        try:
-            # Check if table exists and has rows
-            result = con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
-            if result and result[0] > 0:
-                print(f"Creating backup: {backup_name}")
-                con.execute(f"CREATE TABLE {backup_name} AS SELECT * FROM {table}")
-                backup_names[table] = backup_name
-                print(f"✓ Backup created: {backup_name} ({result[0]} rows)")
-            else:
-                print(f"Skipping backup for {table} (empty or doesn't exist)")
-        except Exception as e:
-            print(f"Could not backup {table}: {e}")
-    
-    return backup_names
-
 # --- helpers ---
 def iso_date(dt): return dt.strftime('%Y-%m-%d')
 
@@ -466,11 +443,8 @@ def run(sample_only=0, force_days=None, dry_run=False):
     if dry_run:
         print("\n--- DRY RUN: No database writes will be performed ---")
     else:
-        # Create backups before any changes
-        print("\n--- Creating backups ---")
-        tables_to_backup = ['movies', 'movie_cast', 'movie_crew', 'tv_shows', 'tv_show_cast_crew']
-        backups = create_backups(con, tables_to_backup)
-        print(f"Backups created: {len(backups)}\n")
+        print("\n--- Live run: TMDB_backup mirror created by backup_to_glacier.py before this step ---")
+
 
     # Determine last_run
     if force_days is not None:
