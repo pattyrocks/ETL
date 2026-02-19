@@ -33,9 +33,9 @@ def backup_database(use_sample=False):
         else:
             print("[Real Run] Backing up MotherDuck (md:TMDB) database using COPY FROM DATABASE...")
             conn = duckdb.connect()
-            conn.execute("ATTACH 'md:'")
-            conn.execute(f"ATTACH '{backup_file}' AS local_db")
-            conn.execute("COPY FROM DATABASE TMDB TO local_db")
+            conn.execute("ATTACH 'md:TMDB' AS source")
+            conn.execute("ATTACH 'md:TMDB_backup' AS backup_db")
+            conn.execute("COPY FROM DATABASE source TO backup_db")
             conn.close()
             print(f"Backup saved locally as {backup_file}")
             return backup_file
