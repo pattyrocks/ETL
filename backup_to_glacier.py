@@ -48,7 +48,7 @@ def upload_to_s3(backup_file):
     aws_secret_key = os.getenv('AWS_SECRET_ACCESS_KEY')
     bucket_name = os.getenv('S3_BUCKET_NAME')
 
-    # Fail immediately with clear message
+    # Fail immediately with clear message instead of cryptic NoneType error
     missing = [k for k, v in {
         'AWS_ACCESS_KEY_ID': aws_access_key,
         'AWS_SECRET_ACCESS_KEY': aws_secret_key,
