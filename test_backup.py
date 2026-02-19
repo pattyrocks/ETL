@@ -1,5 +1,6 @@
 import duckdb
 import os
+import re
 from datetime import datetime
 
 # Use absolute path so script works regardless of working directory
@@ -9,11 +10,23 @@ BACKUP_DIR = os.path.join(SCRIPT_DIR, 'backups')
 MOTHERDUCK_TOKEN = os.getenv('MOTHERDUCK_TOKEN')
 MOTHERDUCK_DB = 'md:TMDB'
 
+# System tables to exclude from counts
+SYSTEM_TABLES = {
+    'databases', 'owned_shares', 'shared_with_me',
+    'storage_info', 'query_history'
+}
+
+# Pattern to detect timestamped backup tables e.g. movies_20260219_163858
+TIMESTAMP_PATTERN = re.compile(r'_\d{8}_\d{6}$')
+
+
 def get_motherduck_connection():
-    """Connect to MotherDuck."""
+    """Connect to MotherDuck using MOTHERDUCK_TOKEN env var (picked up automatically)."""
     if not MOTHERDUCK_TOKEN:
         raise ValueError("MOTHERDUCK_TOKEN environment variable not set")
-    return duckdb.connect(f"{MOTHERDUCK_DB}?motherduck_token={MOTHERDUCK_TOKEN}")
+    # Token is read automatically from the environment by the MotherDuck extension
+    return duckdb.connect(MOTHERDUCK_DB)
+
 
 def list_backups():
     """List all available backups."""
@@ -47,6 +60,7 @@ def list_backups():
         print()
 
     return backups
+
 
 def test_backup(backup_file):
     """Test a backup file by connecting and running queries."""
@@ -134,12 +148,11 @@ def test_backup(backup_file):
         print(f"{'='*60}")
         print(f"\nThis backup appears valid.")
         print(f"\nTo restore this backup to MotherDuck:")
-        print(f"  1. Connect to DuckDB locally:")
+        print(f"  1. Make sure MOTHERDUCK_TOKEN is set in your environment")
+        print(f"  2. Run the following Python:")
         print(f"     conn = duckdb.connect()")
-        print(f"  2. Attach both databases:")
         print(f"     conn.execute(\"ATTACH '{backup_path}' AS backup_db\")")
-        print(f"     conn.execute(\"ATTACH 'md:TMDB?motherduck_token=YOUR_TOKEN' AS target\")")
-        print(f"  3. Copy from backup to MotherDuck:")
+        print(f"     conn.execute(\"ATTACH 'md:TMDB' AS target\")")
         print(f"     conn.execute('COPY FROM DATABASE backup_db TO target')")
         return True
 
@@ -148,6 +161,7 @@ def test_backup(backup_file):
         print(f"Error: {e}")
         print(f"\nMake sure '{backup_path}' is a valid DuckDB database file.")
         return False
+
 
 def compare_with_current():
     """Compare a local backup with the live MotherDuck database."""
@@ -185,15 +199,21 @@ def compare_with_current():
 
         print(f"\nComparing: {backups[idx]} vs md:TMDB\n")
 
-        backup_tables = set([t[0] for t in backup_con.execute("""
-            SELECT table_name FROM information_schema.tables
-            WHERE table_schema = 'main'
-        """).fetchall()])
+        backup_tables = set([
+            t[0] for t in backup_con.execute("""
+                SELECT table_name FROM information_schema.tables
+                WHERE table_schema = 'main'
+            """).fetchall()
+            if t[0] not in SYSTEM_TABLES and not TIMESTAMP_PATTERN.search(t[0])
+        ])
 
-        current_tables = set([t[0] for t in current_con.execute("""
-            SELECT table_name FROM information_schema.tables
-            WHERE table_schema = 'main'
-        """).fetchall()])
+        current_tables = set([
+            t[0] for t in current_con.execute("""
+                SELECT table_name FROM information_schema.tables
+                WHERE table_schema = 'main'
+            """).fetchall()
+            if t[0] not in SYSTEM_TABLES and not TIMESTAMP_PATTERN.search(t[0])
+        ])
 
         common_tables = backup_tables.intersection(current_tables)
 
@@ -225,54 +245,72 @@ def compare_with_current():
     except Exception as e:
         print(f"Error comparing databases: {e}")
 
+
 def check_motherduck_backup_tables():
-    """Inspect in-DB backup tables directly in MotherDuck."""
+    """Inspect live and backup tables in both TMDB and TMDB_backup."""
     print(f"\n{'='*60}")
-    print("CHECKING IN-DB BACKUP TABLES IN MOTHERDUCK")
+    print("CHECKING MOTHERDUCK DATABASES")
     print(f"{'='*60}")
 
     try:
-        con = get_motherduck_connection()
-        print("✓ Connected to md:TMDB\n")
+        conn = duckdb.connect()
+        conn.execute("ATTACH 'md:TMDB' AS TMDB")
+        conn.execute("ATTACH 'md:TMDB_backup' AS TMDB_backup")
 
-        # Find all backup tables
-        all_tables = con.execute("""
-            SELECT table_name
-            FROM information_schema.tables
-            WHERE table_schema = 'main'
-            ORDER BY table_name
-        """).fetchall()
+        for db_name in ['TMDB', 'TMDB_backup']:
+            print(f"\n--- {db_name} ---")
 
-        backup_tables = [t[0] for t in all_tables if '_backup_' in t[0]]
-        live_tables = [t[0] for t in all_tables if '_backup_' not in t[0]]
+            tables = conn.execute(f"""
+                SELECT table_name
+                FROM information_schema.tables
+                WHERE table_schema = 'main'
+                AND table_catalog = '{db_name}'
+                ORDER BY table_name
+            """).fetchall()
 
-        # Print live table counts
-        print(f"{'LIVE TABLES':<35} {'Rows':>12}")
-        print("-" * 50)
-        for table in live_tables:
-            try:
-                count = con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-                print(f"{table:<35} {count:>12,}")
-            except Exception as e:
-                print(f"{table:<35} {'ERROR':>12}")
+            live = [
+                t[0] for t in tables
+                if t[0] not in SYSTEM_TABLES
+                and not TIMESTAMP_PATTERN.search(t[0])
+            ]
+            backups = [
+                t[0] for t in tables
+                if t[0] not in SYSTEM_TABLES
+                and TIMESTAMP_PATTERN.search(t[0])
+            ]
 
-        # Print backup table counts
-        print(f"\n{'BACKUP TABLES':<35} {'Rows':>12}")
-        print("-" * 50)
-        if not backup_tables:
-            print("No backup tables found.")
-        for table in backup_tables:
-            try:
-                count = con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-                status = "⚠ EMPTY" if count == 0 else "✓"
-                print(f"{table:<35} {count:>12,}  {status}")
-            except Exception as e:
-                print(f"{table:<35} {'ERROR':>12}")
+            # Live tables
+            print(f"\n  {'Table':<40} {'Rows':>12}")
+            print("  " + "-" * 55)
+            for table in live:
+                try:
+                    count = conn.execute(
+                        f'SELECT COUNT(*) FROM {db_name}.main."{table}"'
+                    ).fetchone()[0]
+                    print(f"  {table:<40} {count:>12,}")
+                except Exception:
+                    print(f"  {table:<40} {'ERROR':>12}")
 
-        con.close()
+            # Timestamped backup tables
+            if backups:
+                print(f"\n  Timestamped backup tables:")
+                for table in backups:
+                    try:
+                        count = conn.execute(
+                            f'SELECT COUNT(*) FROM {db_name}.main."{table}"'
+                        ).fetchone()[0]
+                        status = "⚠ EMPTY" if count == 0 else "✓"
+                        print(f"  {table:<40} {count:>12,}  {status}")
+                    except Exception:
+                        print(f"  {table:<40} {'ERROR':>12}")
+            else:
+                print(f"\n  No timestamped backup tables found in {db_name}")
+
+        conn.close()
 
     except Exception as e:
-        print(f"Error connecting to MotherDuck: {e}")
+        print(f"Error: {e}")
+
 
 # Main menu
 if __name__ == "__main__":
@@ -291,7 +329,7 @@ if __name__ == "__main__":
     print("1. Test a specific backup")
     print("2. Compare backup with live MotherDuck database")
     print("3. Check in-DB backup tables in MotherDuck")
-    print("4. Exit")  
+    print("4. Exit")
 
     choice = input("\nEnter choice (1-4): ").strip()
 
@@ -313,9 +351,10 @@ if __name__ == "__main__":
     elif choice == '2':
         compare_with_current()
 
-    elif choice == '3':            
-        check_motherduck_backup_tables() 
-    elif choice == '4':                                
+    elif choice == '3':
+        check_motherduck_backup_tables()
+
+    elif choice == '4':
         print("Exiting...")
 
     else:

@@ -612,10 +612,16 @@ logging.basicConfig(level=logging.INFO)
 def backup_to_glacier():
     logging.info("Starting backup to Glacier...")
     try:
-        # Simulating backup process
         script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "backup_to_glacier.py")
-        subprocess.run(["python", script_path], check=True)
+        subprocess.run(
+            ["python", script_path],
+            check=True,
+            timeout=1800  # ← fail after 30 minutes
+        )
         logging.info("Backup to Glacier completed successfully.")
+    except subprocess.TimeoutExpired:
+        logging.error("Backup timed out after 30 minutes — possibly hit MotherDuck compute limit.")
+        return False
     except subprocess.CalledProcessError as e:
         logging.error("Backup to Glacier failed: %s", e)
         return False
