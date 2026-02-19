@@ -495,7 +495,21 @@ def run(sample_only=0, force_days=None, dry_run=False):
     fetch_start = time.time()
     movies_rows, movie_cast_rows, movie_crew_rows = [], [], []
     processed_movie_count = 0
-    for mid in movie_ids:
+    milestones = {int(len(movie_ids) * p) for p in [0.25, 0.50, 0.75, 1.0]}
+    movie_fetch_start = time.time()
+    for i, mid in enumerate(movie_ids):
+        if i in milestones and i > 0:
+            pct = round(i / len(movie_ids) * 100)
+            elapsed = time.time() - movie_fetch_start
+            forecast_total = (elapsed / i) * len(movie_ids)
+            remaining = forecast_total - elapsed
+            print(
+                f"  Movies: {pct}% ({i}/{len(movie_ids)} of {len(movie_ids)} total to upsert) | "
+                f"elapsed: {_format_seconds(elapsed)} | "
+                f"remaining: ~{_format_seconds(remaining)} | "
+                f"ETA: {(datetime.now() + timedelta(seconds=remaining)).strftime('%H:%M:%S UTC')}",
+                flush=True
+            )
         detail, credits = fetch_movie_detail_and_credits(mid)
         if not detail:
             continue
@@ -537,7 +551,21 @@ def run(sample_only=0, force_days=None, dry_run=False):
 
     tv_rows, tv_cast_rows = [], []
     processed_tv_count = 0
-    for tid in tv_ids:
+    milestones = {int(len(tv_ids) * p) for p in [0.25, 0.50, 0.75, 1.0]}
+    tv_fetch_start = time.time()
+    for i, tid in enumerate(tv_ids):
+        if i in milestones and i > 0:
+            pct = round(i / len(tv_ids) * 100)
+            elapsed = time.time() - tv_fetch_start
+            forecast_total = (elapsed / i) * len(tv_ids)
+            remaining = forecast_total - elapsed
+            print(
+                f"  TV shows: {pct}% ({i}/{len(tv_ids)} of {len(tv_ids)} total to upsert) | "
+                f"elapsed: {_format_seconds(elapsed)} | "
+                f"remaining: ~{_format_seconds(remaining)} | "
+                f"ETA: {(datetime.now() + timedelta(seconds=remaining)).strftime('%H:%M:%S UTC')}",
+                flush=True
+            )
         detail, agg = fetch_tv_detail_and_aggregate(tid)
         if not detail:
             continue
