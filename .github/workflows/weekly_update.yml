@@ -44,7 +44,7 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           S3_BUCKET_NAME: ${{ secrets.S3_BUCKET_NAME }}
 
-      - name: Run update job (dry-run by default, sample=10)
+      - name: Run update job
         env:
           TMDBAPIKEY: ${{ secrets.TMDBAPIKEY }}
           MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
