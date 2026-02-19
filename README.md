@@ -233,8 +233,8 @@ All tables include `inserted_at` and `updated_at` audit timestamps.
 - [DuckDB Official Website](https://duckdb.org/)
 - [MotherDuck Documentation](https://motherduck.com/docs/)
 - [Streamlit Documentation](https://docs.streamlit.io/)
-- [AWS S3 Pricing](https://aws.amazon.com/s3/)
+- [AWS S3](https://aws.amazon.com/s3/)
 
 ---
 
-> Built with AI by [Patricia Nascimento](https://www.linkedin.com/in/patricians) 👩🏻‍💻
+> Built by [Patricia Nascimento](https://www.linkedin.com/in/patricians) 👩🏻‍💻
