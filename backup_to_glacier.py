@@ -63,11 +63,12 @@ def upload_to_s3(backup_file):
         s3 = boto3.client(
             's3',
             aws_access_key_id=aws_access_key,
-            aws_secret_access_key=aws_secret_key
+            aws_secret_access_key=aws_secret_key,
+            region_name='ap-south-1'
         )
         s3.upload_file(backup_file, bucket_name, os.path.basename(backup_file), 
-                      ExtraArgs={'StorageClass': 'DEEP_ARCHIVE'})
-        print(f"Uploaded {backup_file} to S3 bucket {bucket_name} with Glacier Deep Archive storage.")
+                      ExtraArgs={'StorageClass': 'GLACIER'})
+        print(f"Uploaded {backup_file} to S3 bucket {bucket_name} with Glacier Flexible Retrieval storage.")
     except Exception as e:
         print(f"Error uploading to S3: {e}")
         exit(1)
