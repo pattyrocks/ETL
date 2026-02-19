@@ -5,3 +5,4 @@ tmdbsimple==2.9.1
 python-dateutil==2.8.2
 python-dotenv>=0.21
 streamlit>=1.30.0
+boto3
