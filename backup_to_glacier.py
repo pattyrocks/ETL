@@ -44,22 +44,33 @@ def backup_database(use_sample=False):
         exit(1)
 
 def upload_to_s3(backup_file):
-    try:
-        aws_access_key = os.getenv('AWS_ACCESS_KEY_ID')
-        aws_secret_key = os.getenv('AWS_SECRET_ACCESS_KEY')
-        bucket_name = os.getenv('S3_BUCKET_NAME')
+    aws_access_key = os.getenv('AWS_ACCESS_KEY_ID')
+    aws_secret_key = os.getenv('AWS_SECRET_ACCESS_KEY')
+    bucket_name = os.getenv('S3_BUCKET_NAME')
 
+    # Fail immediately with clear message
+    missing = [k for k, v in {
+        'AWS_ACCESS_KEY_ID': aws_access_key,
+        'AWS_SECRET_ACCESS_KEY': aws_secret_key,
+        'S3_BUCKET_NAME': bucket_name
+    }.items() if not v]
+    
+    if missing:
+        print(f"Error: Missing required environment variables: {', '.join(missing)}")
+        exit(1)
+
+    try:
         s3 = boto3.client(
             's3',
             aws_access_key_id=aws_access_key,
             aws_secret_access_key=aws_secret_key
         )
-
-        s3.upload_file(backup_file, bucket_name, backup_file, ExtraArgs={'StorageClass': 'DEEP_ARCHIVE'})
+        s3.upload_file(backup_file, bucket_name, os.path.basename(backup_file), 
+                      ExtraArgs={'StorageClass': 'DEEP_ARCHIVE'})
         print(f"Uploaded {backup_file} to S3 bucket {bucket_name} with Glacier Deep Archive storage.")
-        
     except Exception as e:
         print(f"Error uploading to S3: {e}")
+        exit(1)
         try:
             # Gather AWS credentials from environment variables
             aws_access_key = os.getenv('AWS_ACCESS_KEY_ID')
