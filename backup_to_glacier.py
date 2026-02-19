@@ -37,6 +37,11 @@ def backup_database(use_sample=False):
 
             md_timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
 
+            # Delete local file if it already exists from a previous failed run
+            if os.path.exists(backup_file):
+                os.remove(backup_file)
+                print(f"Removed stale local backup file: {backup_file}")
+
             conn = duckdb.connect()
             conn.execute(f"ATTACH 'md:?motherduck_token={MOTHERDUCK_TOKEN}' AS md")
             conn.execute("ATTACH 'md:TMDB' AS TMDB")
@@ -69,7 +74,7 @@ def backup_database(use_sample=False):
                 name = table[0]
                 new_name = f"{name}_{md_timestamp}"
                 conn.execute(f"""
-                    CREATE TABLE TMDB_backup.main."{new_name}" AS
+                    CREATE OR REPLACE TABLE TMDB_backup.main."{new_name}" AS
                     SELECT * FROM TMDB.main."{name}"
                 """)
                 new_tables.append(new_name)
@@ -82,10 +87,17 @@ def backup_database(use_sample=False):
                     conn.execute(f'DROP TABLE IF EXISTS TMDB_backup.main."{table_name}"')
                     print(f"  Dropped: {table_name}")
 
-            # Copy TMDB to local file for S3 upload
+            # Copy TMDB to local file for S3 upload table by table
+            # Using CREATE OR REPLACE to avoid conflicts on any stale local file
             print("Copying TMDB to local file for S3 upload...")
             conn.execute(f"ATTACH '{backup_file}' AS local_db")
-            conn.execute("COPY FROM DATABASE TMDB TO local_db")
+            for table in source_tables:
+                name = table[0]
+                conn.execute(f"""
+                    CREATE OR REPLACE TABLE local_db.main."{name}" AS
+                    SELECT * FROM TMDB.main."{name}"
+                """)
+                print(f"  ✓ Local copy: {name}")
             conn.close()
 
             print(f"Backup saved locally as {backup_file}")
