@@ -4,6 +4,8 @@ import boto3
 from datetime import datetime
 import duckdb
 
+MOTHERDUCK_TOKEN = os.getenv('MOTHERDUCK_TOKEN')
+
 def create_sample_database(db_name='TMDB_test.db'):
     conn = duckdb.connect(database=db_name)
     conn.execute('CREATE OR REPLACE TABLE movies (id INTEGER, title VARCHAR, year INTEGER)')
@@ -14,15 +16,14 @@ def create_sample_database(db_name='TMDB_test.db'):
 def backup_database(use_sample=False):
     try:
         import shutil
+
         timestamp = datetime.utcnow().strftime('%Y-%m-%d_%H-%M-%S')
         backup_filename = f"duckdb_backup_{timestamp}.db"
-        # Use absolute path so it works regardless of working directory
-        backup_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), backup_filename)
 
-        # Save to ETL/backups folder
+        # Use absolute path so it works regardless of working directory
         script_dir = os.path.dirname(os.path.abspath(__file__))
         backups_dir = os.path.join(script_dir, 'backups')
-        os.makedirs(backups_dir, exist_ok=True)  # Create folder if it doesn't exist
+        os.makedirs(backups_dir, exist_ok=True)
         backup_file = os.path.join(backups_dir, backup_filename)
 
         if use_sample:
@@ -30,15 +31,66 @@ def backup_database(use_sample=False):
             shutil.copy2('TMDB_test.db', backup_file)
             print(f"Sample backup saved locally as {backup_file}")
             return backup_file
+
         else:
             print("[Real Run] Backing up MotherDuck (md:TMDB) database using COPY FROM DATABASE...")
+
+            md_timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+
             conn = duckdb.connect()
-            conn.execute("ATTACH 'md:TMDB' AS source")
-            conn.execute("ATTACH 'md:TMDB_backup' AS backup_db")
-            conn.execute("COPY FROM DATABASE source TO backup_db")
+            conn.execute(f"ATTACH 'md:?motherduck_token={MOTHERDUCK_TOKEN}' AS md")
+            conn.execute("ATTACH 'md:TMDB' AS TMDB")
+            conn.execute("ATTACH 'md:TMDB_backup' AS TMDB_backup")
+
+            # Find existing backup tables in TMDB_backup (from previous runs)
+            print("Finding previous backup tables in TMDB_backup...")
+            existing_tables = conn.execute("""
+                SELECT table_name
+                FROM information_schema.tables
+                WHERE table_schema = 'main'
+                AND table_catalog = 'TMDB_backup'
+            """).fetchall()
+            previous_tables = [t[0] for t in existing_tables]
+            print(f"  Found {len(previous_tables)} existing tables to replace after new backup completes")
+
+            # Get live tables from TMDB (exclude any stale backup tables)
+            source_tables = conn.execute("""
+                SELECT table_name
+                FROM information_schema.tables
+                WHERE table_schema = 'main'
+                AND table_catalog = 'TMDB'
+                AND table_name NOT LIKE '%\_backup\_%' ESCAPE '\\'
+            """).fetchall()
+
+            # Copy each table to TMDB_backup with timestamp suffix
+            print(f"Copying tables to TMDB_backup with timestamp {md_timestamp}...")
+            new_tables = []
+            for table in source_tables:
+                name = table[0]
+                new_name = f"{name}_{md_timestamp}"
+                conn.execute(f"""
+                    CREATE TABLE TMDB_backup.main."{new_name}" AS
+                    SELECT * FROM TMDB.main."{name}"
+                """)
+                new_tables.append(new_name)
+                print(f"  ✓ Copied: {name} → {new_name}")
+
+            # Only delete previous tables after all new ones created successfully
+            if previous_tables:
+                print("Deleting previous backup tables...")
+                for table_name in previous_tables:
+                    conn.execute(f'DROP TABLE IF EXISTS TMDB_backup.main."{table_name}"')
+                    print(f"  Dropped: {table_name}")
+
+            # Copy TMDB to local file for S3 upload
+            print("Copying TMDB to local file for S3 upload...")
+            conn.execute(f"ATTACH '{backup_file}' AS local_db")
+            conn.execute("COPY FROM DATABASE TMDB TO local_db")
             conn.close()
+
             print(f"Backup saved locally as {backup_file}")
             return backup_file
+
     except Exception as e:
         print(f"Error backing up database: {e}")
         exit(1)
@@ -48,13 +100,13 @@ def upload_to_s3(backup_file):
     aws_secret_key = os.getenv('AWS_SECRET_ACCESS_KEY')
     bucket_name = os.getenv('S3_BUCKET_NAME')
 
-    # Fail immediately with clear message instead of cryptic NoneType error
+    # Fail immediately with a clear message
     missing = [k for k, v in {
         'AWS_ACCESS_KEY_ID': aws_access_key,
         'AWS_SECRET_ACCESS_KEY': aws_secret_key,
         'S3_BUCKET_NAME': bucket_name
     }.items() if not v]
-    
+
     if missing:
         print(f"Error: Missing required environment variables: {', '.join(missing)}")
         exit(1)
@@ -66,60 +118,23 @@ def upload_to_s3(backup_file):
             aws_secret_access_key=aws_secret_key,
             region_name='ap-south-1'
         )
-        s3.upload_file(backup_file, bucket_name, os.path.basename(backup_file), 
-                      ExtraArgs={'StorageClass': 'GLACIER'})
-        print(f"Uploaded {backup_file} to S3 bucket {bucket_name} with Glacier Flexible Retrieval storage.")
+        s3.upload_file(
+            backup_file,
+            bucket_name,
+            os.path.basename(backup_file),
+            ExtraArgs={'StorageClass': 'GLACIER'}
+        )
+        print(f"Uploaded {os.path.basename(backup_file)} to S3 bucket {bucket_name} with Glacier Flexible Retrieval storage.")
     except Exception as e:
         print(f"Error uploading to S3: {e}")
         exit(1)
-        try:
-            # Gather AWS credentials from environment variables
-            aws_access_key = os.getenv('AWS_ACCESS_KEY_ID')
-            aws_secret_key = os.getenv('AWS_SECRET_ACCESS_KEY')
-            bucket_name = os.getenv('S3_BUCKET_NAME')
-
-            # Create S3 client
-            s3 = boto3.client(
-                's3',
-                aws_access_key_id=aws_access_key,
-                aws_secret_access_key=aws_secret_key
-            )
-
-            # Delete prior local backups (except the current one)
-            for fname in os.listdir('.'):
-                if fname.startswith('duckdb_backup_') and fname.endswith('.db') and fname != backup_file:
-                    try:
-                        os.remove(fname)
-                        print(f"Deleted old local backup: {fname}")
-                    except Exception as e:
-                        print(f"Failed to delete local backup {fname}: {e}")
-
-            # Delete prior S3 backups (except the current one)
-            response = s3.list_objects_v2(Bucket=bucket_name, Prefix='duckdb_backup_')
-            if 'Contents' in response:
-                for obj in response['Contents']:
-                    key = obj['Key']
-                    if key != backup_file and key.endswith('.db'):
-                        try:
-                            s3.delete_object(Bucket=bucket_name, Key=key)
-                            print(f"Deleted old S3 backup: {key}")
-                        except Exception as e:
-                            print(f"Failed to delete S3 backup {key}: {e}")
-
-            # Upload the backup file to S3 with Glacier storage class
-            s3.upload_file(backup_file, bucket_name, backup_file, ExtraArgs={'StorageClass': 'DEEP_ARCHIVE'})
-            print(f"Uploaded {backup_file} to S3 bucket {bucket_name} with Glacier Deep Archive storage.")
-        
-        except Exception as e:
-            print(f"Error uploading to S3: {e}")
-            exit(1)
 
 
 if __name__ == "__main__":
     use_sample = "--sample" in sys.argv
-    
+
     if use_sample:
         create_sample_database()
-    
+
     backup_file = backup_database(use_sample=use_sample)
     upload_to_s3(backup_file)
