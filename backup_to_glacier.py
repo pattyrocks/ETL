@@ -43,7 +43,6 @@ def backup_database(use_sample=False):
                 print(f"Removed stale local backup file: {backup_file}")
 
             conn = duckdb.connect()
-            conn.execute(f"ATTACH 'md:?motherduck_token={MOTHERDUCK_TOKEN}' AS md")
             conn.execute("ATTACH 'md:TMDB' AS TMDB")
             conn.execute("ATTACH 'md:TMDB_backup' AS TMDB_backup")
 
