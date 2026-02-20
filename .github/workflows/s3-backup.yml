@@ -1,4 +1,4 @@
-name: thursday-backup
+name: s3-backup
 
 on:
   schedule:
