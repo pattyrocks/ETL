@@ -628,15 +628,8 @@ def backup_to_glacier():
     return True
 
 def run_update_with_backup(sample_only=0, force_days=None, dry_run=False):
-    if not dry_run:
-        if not backup_to_glacier():
-            logging.error("Update halted due to backup failure.")
-            return
-    else:
-        logging.info("Dry run mode: Backup skipped.")
-
-    # Proceed with the main update logic
-    logging.info("Proceeding with update operations...")
+    # Backup runs as a separate Thursday workflow — skipped here
+    logging.info("Backup handled by separate scheduled workflow. Proceeding with update...")
     run(sample_only=sample_only, force_days=force_days, dry_run=dry_run)
 
 
