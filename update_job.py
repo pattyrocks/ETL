@@ -148,7 +148,7 @@ def call_changes(endpoint, start_date, end_date, max_pages=1000):
             'page': page
         }
         try:
-            resp = requests.get(url, params=params, timeout=30)
+            resp = requests.get(url, params=params)
             resp.raise_for_status()
             data = resp.json()
             results = data.get('results', [])
@@ -616,7 +616,6 @@ def backup_to_glacier():
         subprocess.run(
             ["python", script_path],
             check=True,
-            timeout=1800  # ← fail after 30 minutes
         )
         logging.info("Backup to Glacier completed successfully.")
     except subprocess.TimeoutExpired:
