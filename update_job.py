@@ -111,14 +111,20 @@ def get_connection():
     """Connect to MotherDuck."""
     if not MOTHERDUCK_TOKEN:
         raise ValueError("MOTHERDUCK_TOKEN environment variable not set")
-    return duckdb.connect(f"{MOTHERDUCK_DB}?motherduck_token={MOTHERDUCK_TOKEN}")
+    return duckdb.connect(MOTHERDUCK_DB)
 
 # --- helpers ---
-def iso_date(dt): return dt.strftime('%Y-%m-%d')
+def iso_date(dt): 
+    return dt.strftime('%Y-%m-%d')
 
 def get_last_run(con, job_name='weekly_update'):
-    con.execute('CREATE TABLE IF NOT EXISTS last_updates (job_name VARCHAR PRIMARY KEY, last_run TIMESTAMP, inserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);')
-    row = con.execute("SELECT last_run FROM last_updates WHERE job_name = ?;", [job_name]).fetchone()
+    row = con.execute("""
+        SELECT last_run FROM last_updates
+        WHERE job_name = ?
+        ORDER BY last_run DESC
+        LIMIT 1
+        """, [job_name]).fetchone()
+
     if row and row[0] is not None:
         try:
             return datetime.fromisoformat(row[0])
@@ -130,7 +136,10 @@ def get_last_run(con, job_name='weekly_update'):
     return datetime.now(timezone.utc) - timedelta(days=7)
 
 def set_last_run(con, ts, job_name='weekly_update'):
-    con.execute("INSERT OR REPLACE INTO last_updates (job_name, last_run) VALUES (?, ?);", [job_name, ts.isoformat()])
+    con.execute("""
+        INSERT INTO last_updates (job_name, last_run, inserted_at, updated_at)
+        VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    """, [job_name, ts.isoformat()])
 
 def call_changes(endpoint, start_date, end_date, max_pages=1000):
     """
@@ -302,15 +311,25 @@ def ensure_tables(con):
         );
     """)
 
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS last_updates (
+            job_name VARCHAR,
+            last_run TIMESTAMP,
+            inserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    """)
+
     # Add inserted_at and updated_at columns to existing tables (idempotent)
-    for table in ['movies', 'movie_cast', 'movie_crew', 'tv_shows', 'tv_show_cast_crew', 'last_updates']:
+    for table in ['movies', 'movie_cast', 'movie_crew', 'tv_shows', 'tv_show_cast_crew']:
         con.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS inserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;")
         con.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;")
 
 # --- upsert helpers ---
 def upsert_table_from_rows(con, rows, table_name, canonical_cols, key_col=None, dry_run=False):
     """
-    Upsert rows (list of dict) into table_name using canonical_cols ordering.
+    Upsert rows (list of dict) into table_nam
+    e using canonical_cols ordering.
     Preserves inserted_at from existing rows, sets updated_at to current timestamp.
     If dry_run is True, print what would be done, skip DB writes, and write a summary CSV preview.
     """
