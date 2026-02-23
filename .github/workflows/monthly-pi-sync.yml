@@ -3,7 +3,7 @@ name: monthly-pi-sync
 on:
   workflow_dispatch:  # manual trigger only
   schedule:
-    - cron: '0 4 1 * *'
+    - cron: '0 4 1 * *'  # 1st of every month at 04:00 UTC
 
 jobs:
   sync-to-pi:
@@ -23,6 +23,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+
       - name: Connect to Tailscale
         uses: tailscale/github-action@v4
         with:
@@ -30,7 +31,6 @@ jobs:
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:ci
           version: latest
-          ping: ${{ secrets.PI_HOST }}
 
       - name: Set up SSH key
         run: |
@@ -81,11 +81,11 @@ jobs:
           print(f"File size: {size_mb:.1f} MB")
           EOF
 
-      - name: Create target directory on Pi
+      - name: Create target directory on Pi (ZFS SSD)
         run: |
           ssh -i ~/.ssh/pi_key -o StrictHostKeyChecking=no \
             ${{ secrets.PI_USER }}@${{ secrets.PI_HOST }} \
-            "mkdir -p ~/tmdb_data"
+            "mkdir -p /media/tmdb_data"
 
       - name: Copy .db file to Pi
         run: |
@@ -93,16 +93,16 @@ jobs:
           echo "Copying $DB_FILE to Pi..."
           scp -i ~/.ssh/pi_key -o StrictHostKeyChecking=no \
             "$DB_FILE" \
-            ${{ secrets.PI_USER }}@${{ secrets.PI_HOST }}:~/tmdb_data/TMDB_latest.db
+            ${{ secrets.PI_USER }}@${{ secrets.PI_HOST }}:/media/tmdb_data/TMDB_latest.db
           echo "✓ Copy complete"
 
-      - name: Verify file on Pi and clean up old files
+      - name: Verify file on Pi
         run: |
           ssh -i ~/.ssh/pi_key -o StrictHostKeyChecking=no \
             ${{ secrets.PI_USER }}@${{ secrets.PI_HOST }} << 'ENDSSH'
-            echo "Files in ~/tmdb_data:"
-            ls -lh ~/tmdb_data/
+            echo "Files in /media/tmdb_data:"
+            ls -lh /media/tmdb_data/
             echo ""
             echo "Disk usage:"
-            df -h ~/tmdb_data/
+            df -h /media/tmdb_data/
           ENDSSH
