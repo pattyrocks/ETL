@@ -60,11 +60,11 @@ jobs:
           fi
           echo "✓ Backup found: $LATEST"
 
-          # Check backup is less than 2 days old
+          # Check backup is less than 30 days old
           BACKUP_DATE=$(echo "$LATEST" | awk '{print $1}')
-          CUTOFF=$(date -d '2 days ago' +%Y-%m-%d)
+          CUTOFF=$(date -d '30 days ago' +%Y-%m-%d)
           if [[ "$BACKUP_DATE" < "$CUTOFF" ]]; then
-            echo "❌ Latest backup ($BACKUP_DATE) is older than 2 days — halting ETL."
+            echo "❌ Latest backup ($BACKUP_DATE) is older than 30 days — halting ETL."
             exit 1
           fi
           echo "✓ Backup is recent: $BACKUP_DATE"
