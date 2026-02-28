@@ -316,16 +316,9 @@ def ensure_tables(con):
             job_name VARCHAR,
             last_run TIMESTAMP,
             inserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (job_name, last_run)
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     """)
-
-    # Migration: update PK to composite (job_name, last_run) if not already done
-    try:
-        con.execute("ALTER TABLE last_updates ADD PRIMARY KEY (job_name, last_run);")
-    except Exception:
-        pass  # PK already exists or not supported, nothing to do
 
     # Add inserted_at and updated_at columns to existing tables (idempotent)
     for table in ['movies', 'movie_cast', 'movie_crew', 'tv_shows', 'tv_show_cast_crew']:
