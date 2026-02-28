@@ -320,6 +320,12 @@ def ensure_tables(con):
         );
     """)
 
+    # Migration: drop primary key from last_updates to allow append-only inserts
+    try:
+        con.execute("ALTER TABLE last_updates DROP CONSTRAINT last_updates_pkey;")
+    except Exception:
+        pass  # Constraint already dropped or doesn't exist — nothing to do
+
     # Add inserted_at and updated_at columns to existing tables (idempotent)
     for table in ['movies', 'movie_cast', 'movie_crew', 'tv_shows', 'tv_show_cast_crew']:
         con.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS inserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;")
