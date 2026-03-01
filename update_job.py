@@ -592,6 +592,20 @@ def run(sample_only=0, force_days=None, dry_run=False):
         processed_tv_count += 1
         time.sleep(0.12)
 
+    # MotherDuck connection health check before upsert phase
+    print("Checking MotherDuck connection before upsert phase...")
+    try:
+        con.execute("SELECT 1").fetchone()
+        print("✓ MotherDuck connection alive — proceeding to upsert phase")
+    except Exception as e:
+        print(f"⚠️ MotherDuck connection was stale ({e}) — reconnecting...")
+        try:
+            con.close()
+        except Exception:
+            pass
+        con = get_connection()
+        print("✓ MotherDuck reconnected successfully")
+
     fetch_end = time.time()
     fetch_elapsed = fetch_end - fetch_start
     processed_count = processed_movie_count + processed_tv_count
