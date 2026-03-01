@@ -7,6 +7,9 @@ The pipeline supports incremental updates, timestamped backups, safe repeatable 
 🌐 **Live dashboard:** [tmdbetl.streamlit.app](https://tmdbetl.streamlit.app)
 
 [![etl-update](https://github.com/pattyrocks/ETL/actions/workflows/etl-update.yml/badge.svg)](https://github.com/pattyrocks/ETL/actions/workflows/etl-update.yml)
+[![s3-backup](https://github.com/pattyrocks/ETL/actions/workflows/s3-backup.yml/badge.svg)](https://github.com/pattyrocks/ETL/actions/workflows/s3-backup.yml)
+[![monthly-pi-sync](https://github.com/pattyrocks/ETL/actions/workflows/monthly-pi-sync.yml/badge.svg)](https://github.com/pattyrocks/ETL/actions/workflows/monthly-pi-sync.yml)
+
 
 ---
 
