@@ -117,13 +117,12 @@ def get_connection():
 def iso_date(dt): 
     return dt.strftime('%Y-%m-%d')
 
-def get_last_run(con, job_name='weekly_update'):
+def get_last_run(con):
     row = con.execute("""
         SELECT last_run FROM last_updates
-        WHERE job_name = ?
         ORDER BY last_run DESC
         LIMIT 1
-        """, [job_name]).fetchone()
+        """).fetchone()
 
     if row and row[0] is not None:
         try:
@@ -135,11 +134,18 @@ def get_last_run(con, job_name='weekly_update'):
                 pass
     return datetime.now(timezone.utc) - timedelta(days=7)
 
-def set_last_run(con, ts, job_name='weekly_update'):
-    con.execute("""
-        INSERT INTO last_updates (job_name, last_run, inserted_at, updated_at)
-        VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-    """, [job_name, ts.isoformat()])
+def set_last_run(con, ts):
+    con.execute("BEGIN")
+    try:
+        con.execute("DELETE FROM last_updates")
+        con.execute("""
+            INSERT INTO last_updates (last_run, inserted_at, updated_at)
+            VALUES (?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        """, [ts.isoformat()])
+        con.execute("COMMIT")
+    except Exception:
+        con.execute("ROLLBACK")
+        raise
 
 def call_changes(endpoint, start_date, end_date, max_pages=1000):
     """
@@ -311,20 +317,23 @@ def ensure_tables(con):
         );
     """)
 
+    # Migration: if last_updates has job_name column (old schema), drop and recreate it
+    try:
+        cols = [row[0] for row in con.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = 'last_updates'"
+        ).fetchall()]
+        if 'job_name' in cols:
+            con.execute("DROP TABLE last_updates;")
+    except Exception:
+        pass  # Table doesn't exist yet — nothing to do
+
     con.execute("""
         CREATE TABLE IF NOT EXISTS last_updates (
-            job_name VARCHAR,
             last_run TIMESTAMP,
             inserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     """)
-
-    # Migration: drop primary key from last_updates to allow append-only inserts
-    try:
-        con.execute("ALTER TABLE last_updates DROP CONSTRAINT last_updates_pkey;")
-    except Exception:
-        pass  # Constraint already dropped or doesn't exist — nothing to do
 
     # Add inserted_at and updated_at columns to existing tables (idempotent)
     for table in ['movies', 'movie_cast', 'movie_crew', 'tv_shows', 'tv_show_cast_crew']:
