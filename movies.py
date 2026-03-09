@@ -4,9 +4,27 @@ import duckdb
 import pandas as pd
 import time
 import requests
+import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
 
 tmdb.API_KEY = os.getenv('TMDBAPIKEY')
+
+# --- logging setup ---
+_log_file = f"movies_diagnostics_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(_log_file),
+        logging.StreamHandler(),
+    ]
+)
+logger = logging.getLogger(__name__)
+
+def log_and_print(message, level='info'):
+    """Log to file and print message to console at the given level."""
+    getattr(logger, level)(message)
 
 con = duckdb.connect(database='TMDB', read_only=False)
 
@@ -71,13 +89,13 @@ def fetch_movie_info(movie_id):
 
         return selected_df
     except requests.exceptions.HTTPError as e:
-        print(f"ERROR: HTTPError for movie ID {movie_id}: {e}")
+        log_and_print(f"ERROR: HTTPError for movie ID {movie_id}: {e}", level='error')
         return ('http', movie_id)
     except KeyError as e:
-        print(f"ERROR: KeyError for movie ID {movie_id} - Missing data: {e}. DataFrame conversion might fail.")
+        log_and_print(f"ERROR: KeyError for movie ID {movie_id} - Missing data: {e}. DataFrame conversion might fail.", level='error')
         return ('key', movie_id)
     except Exception as e:
-        print(f"ERROR: An unexpected error occurred for movie ID {movie_id}: {e}")
+        log_and_print(f"ERROR: An unexpected error occurred for movie ID {movie_id}: {e}", level='error')
         return ('other', movie_id)
 
 def add_info_to_movies_parallel(max_workers=8):
@@ -85,10 +103,10 @@ def add_info_to_movies_parallel(max_workers=8):
     movies_ids_df = con.sql('''SELECT id FROM movies''').fetchdf()
 
     if movies_ids_df.empty:
-        print("No movie IDs found in the 'movies' table. Please populate it first.")
+        log_and_print("No movie IDs found in the 'movies' table. Please populate it first.")
         return
 
-    print("Starting movie data retrieval...\n")
+    log_and_print("Starting movie data retrieval...\n")
 
     futures = []
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -103,6 +121,7 @@ def add_info_to_movies_parallel(max_workers=8):
                 continue
             selected_df = result
             try:
+                t0 = time.time()
                 con.execute(f'''
                     UPDATE movies
                     SET
@@ -139,16 +158,16 @@ def add_info_to_movies_parallel(max_workers=8):
                 elapsed_time = end_time - start_time
                 minutes = int(elapsed_time // 60)
                 remaining_seconds = elapsed_time % 60
-                print(f'Successfully updated data for movie ID {selected_df["id"].values[0]}. Processed {processed_count} records in {minutes}m{remaining_seconds:.2f}s')
+                log_and_print(f'Successfully updated data for movie ID {selected_df["id"].values[0]} (query: {time.time()-t0:.3f}s). Processed {processed_count} records in {minutes}m{remaining_seconds:.2f}s')
             except Exception as e:
-                print(f"ERROR: Could not update movie ID {selected_df['id'].values[0]}: {e}")
+                log_and_print(f"ERROR: Could not update movie ID {selected_df['id'].values[0]}: {e}", level='error')
                 skipped_ids.append(selected_df['id'].values[0])
                 continue
 
-    print(f"\nProcessing complete.")
-    print(f"Successfully processed {processed_count} movies.")
+    log_and_print(f"\nProcessing complete.")
+    log_and_print(f"Successfully processed {processed_count} movies.")
 
     if skipped_ids:
-        print(f"Skipped IDs due to errors: {skipped_ids}")
+        log_and_print(f"Skipped IDs due to errors: {skipped_ids}", level='warning')
 
 add_info_to_movies_parallel()
