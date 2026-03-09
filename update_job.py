@@ -535,14 +535,26 @@ def _format_seconds(s: float) -> str:
     mins, secs = divmod(rem, 60)
     return f"{int(hrs)}h {int(mins)}m {secs:.2f}s"
 
+SNAPSHOT_SAMPLE_ROWS = 1000  # Max rows to fetch per snapshot to limit memory usage
+
 def save_snapshot(con, table_name, label=''):
-    """Save an interim snapshot of a database table to a CSV file."""
+    """Save a diagnostic sample snapshot of a database table to a CSV file.
+
+    Only the first SNAPSHOT_SAMPLE_ROWS rows are fetched to avoid loading the
+    full table into memory (which could be tens-of-thousands of rows for large
+    tables like movies or movie_cast).
+    """
     tag = label or datetime.now().strftime('%Y%m%d_%H%M%S')
     snapshot_path = f"/tmp/snapshot_{table_name}_{tag}.csv"
     try:
-        df = con.execute(f"SELECT * FROM {table_name}").fetchdf()
+        total_rows = con.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
+        log_and_print(
+            f"Snapshot: '{table_name}' has {total_rows} total rows; "
+            f"saving sample of up to {SNAPSHOT_SAMPLE_ROWS} rows to {snapshot_path}"
+        )
+        df = con.execute(f"SELECT * FROM {table_name} LIMIT {SNAPSHOT_SAMPLE_ROWS}").fetchdf()
         df.to_csv(snapshot_path, index=False)
-        log_and_print(f"Snapshot of '{table_name}' ({len(df)} rows) saved to {snapshot_path}")
+        log_and_print(f"Snapshot of '{table_name}' ({len(df)}/{total_rows} rows) saved to {snapshot_path}")
     except Exception as e:
         log_and_print(f"Failed to save snapshot for '{table_name}': {e}", level='error')
 
@@ -740,11 +752,6 @@ def run(sample_only=0, force_days=None, dry_run=False):
     upsert_table_from_rows(con, tv_rows, 'tv_shows', TV_SHOWS_COLS, key_col='id', dry_run=dry_run)
     upsert_table_from_rows(con, tv_cast_rows, 'tv_show_cast_crew', TV_CAST_COLS, key_col='tv_id', dry_run=dry_run)
 
-    # Save diagnostic snapshots of critical tables
-    snapshot_tag = datetime.now().strftime('%Y%m%d_%H%M%S')
-    for tbl in ['movies', 'movie_cast', 'tv_shows']:
-        save_snapshot(con, tbl, label=snapshot_tag)
-
     if not dry_run:
         set_last_run(con, now)
     else:
@@ -762,6 +769,11 @@ def run(sample_only=0, force_days=None, dry_run=False):
     if sample_only and sample_only > 0 and processed_count > 0:
         estimated_total_run = predicted_fetch_total + upsert_elapsed
         log_and_print(f"Estimated total run time for full dataset ({total_changes} items): {_format_seconds(estimated_total_run)} (based on sample)")
+
+    # Save diagnostic snapshots of critical tables (outside upsert timing to keep measurements clean)
+    snapshot_tag = datetime.now().strftime('%Y%m%d_%H%M%S')
+    for tbl in ['movies', 'movie_cast', 'tv_shows']:
+        save_snapshot(con, tbl, label=snapshot_tag)
 
     con.close()
     log_and_print(f"\n✓ Update complete! Full diagnostics written to {_log_file}")
