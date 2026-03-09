@@ -3,8 +3,10 @@ import os
 import duckdb
 import pandas as pd
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed # For parallel API calls
+import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import math
+from datetime import datetime
 
 tmdb.API_KEY = os.getenv('TMDBAPIKEY')
 DATABASE_PATH = 'TMDB'
@@ -12,6 +14,22 @@ DATABASE_PATH = 'TMDB'
 MAX_API_WORKERS = 15
 
 DB_INSERT_BATCH_SIZE = None # None means insert all at once
+
+# --- logging setup ---
+_log_file = f"movie_cast_diagnostics_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(_log_file),
+        logging.StreamHandler(),
+    ]
+)
+logger = logging.getLogger(__name__)
+
+def log_and_print(message, level='info'):
+    """Log to file and print message to console at the given level."""
+    getattr(logger, level)(message)
 
 def fetch_movie_credits(movie_id):
     """
@@ -42,7 +60,7 @@ def fetch_movie_credits(movie_id):
             })
         return processed_cast_data
     except Exception as e:
-        print(f"Error fetching credits for movie ID {movie_id}: {e}")
+        log_and_print(f"Error fetching credits for movie ID {movie_id}: {e}", level='error')
         return []
 
 def create_credits():
@@ -55,21 +73,21 @@ def create_credits():
     processed_movies_count = 0
     total_cast_members_count = 0
 
-    print('Starting data retrieval of movie IDs from DuckDB...')
+    log_and_print('Starting data retrieval of movie IDs from DuckDB...')
     # Consider only fetching IDs for movies that don't yet have cast data,
     # if you are resuming an interrupted process:
     movies_ids_df = con.execute('''SELECT id FROM movies WHERE id NOT IN (SELECT DISTINCT movie_id AS id FROM movie_cast)''').fetchdf()
     # movies_ids_df = con.execute('''SELECT id FROM movies LIMIT 100''').fetchdf()
     movie_ids_to_process = movies_ids_df['id'].tolist()
     total_movies_to_process = len(movie_ids_to_process)
-    print(f"Found {total_movies_to_process} movie IDs to process.")
+    log_and_print(f"Found {total_movies_to_process} movie IDs to process.")
 
     if total_movies_to_process == 0:
-        print("No movie IDs to process. Exiting.")
+        log_and_print("No movie IDs to process. Exiting.")
         con.close()
         return
 
-    print(f'Starting parallel API retrieval with {MAX_API_WORKERS} workers...')
+    log_and_print(f'Starting parallel API retrieval with {MAX_API_WORKERS} workers...')
     start_api_fetch_time = time.time()
 
     with ThreadPoolExecutor(max_workers=MAX_API_WORKERS) as executor:
@@ -86,32 +104,31 @@ def create_credits():
             if processed_movies_count % (total_movies_to_process // 10 or 1) == 0 or processed_movies_count == total_movies_to_process:
                 elapsed_api_time = time.time() - start_api_fetch_time
                 progress_percent = (processed_movies_count / total_movies_to_process) * 100
-                print(f"Progress: {progress_percent:.1f}% | Processed {processed_movies_count}/{total_movies_to_process} movies | Fetched {total_cast_members_count} cast members | Elapsed API fetch time: {elapsed_api_time:.2f}s")
+                log_and_print(f"Progress: {progress_percent:.1f}% | Processed {processed_movies_count}/{total_movies_to_process} movies | Fetched {total_cast_members_count} cast members | Elapsed API fetch time: {elapsed_api_time:.2f}s")
                 # Optional: Add a small sleep here to respect rate limits if hitting them
                 # time.sleep(0.01)
 
     end_api_fetch_time = time.time()
-    print(f'Finished API retrieval in {end_api_fetch_time - start_api_fetch_time:.2f} seconds.')
-    print(f'Total cast members fetched: {total_cast_members_count}')
+    log_and_print(f'Finished API retrieval in {end_api_fetch_time - start_api_fetch_time:.2f} seconds.')
+    log_and_print(f'Total cast members fetched: {total_cast_members_count}')
 
     if not all_cast_data_flat:
-        print("No cast data retrieved. Exiting.")
+        log_and_print("No cast data retrieved. Exiting.")
         con.close()
         return
 
-    print('Starting to create DataFrame from all fetched data...')
+    log_and_print('Starting to create DataFrame from all fetched data...')
     start_df_create_time = time.time()
     # Create the DataFrame once from the flat list of dictionaries
     cast_df = pd.DataFrame(all_cast_data_flat)
 
     end_df_create_time = time.time()
-    print(f'DataFrame created in {end_df_create_time - start_df_create_time:.2f} seconds.')
-    print("Sample of the consolidated DataFrame:")
-    print(cast_df.head())
-    print("DataFrame Info:")
+    log_and_print(f'DataFrame created in {end_df_create_time - start_df_create_time:.2f} seconds.')
+    log_and_print(f"Sample of the consolidated DataFrame:\n{cast_df.head()}")
+    log_and_print("DataFrame Info:")
     cast_df.info()
 
-    print('Starting to create/insert into DuckDB table...')
+    log_and_print('Starting to create/insert into DuckDB table...')
     start_db_insert_time = time.time()
 
     try:
@@ -142,27 +159,29 @@ def create_credits():
 
         if DB_INSERT_BATCH_SIZE is None or len(cast_df) <= DB_INSERT_BATCH_SIZE:
             # Insert all at once if no batching is specified or DataFrame is small
+            t0 = time.time()
             con.execute(f"INSERT INTO movie_cast ({cast_columns}) SELECT {cast_columns} FROM cast_df;")
-            print(f"Inserted all {len(cast_df)} rows into 'movie_cast'.")
+            log_and_print(f"Inserted all {len(cast_df)} rows into 'movie_cast' in {time.time() - t0:.2f}s.")
         else:
             # Batch insert if DataFrame is extremely large
             num_batches = math.ceil(len(cast_df) / DB_INSERT_BATCH_SIZE)
-            print(f"Inserting in {num_batches} batches of {DB_INSERT_BATCH_SIZE} rows...")
+            log_and_print(f"Inserting in {num_batches} batches of {DB_INSERT_BATCH_SIZE} rows...")
             for i in range(num_batches):
                 start_idx = i * DB_INSERT_BATCH_SIZE
                 end_idx = min((i + 1) * DB_INSERT_BATCH_SIZE, len(cast_df))
                 batch_df = cast_df.iloc[start_idx:end_idx]
 
+                t0 = time.time()
                 con.execute(f"INSERT INTO movie_cast ({cast_columns}) SELECT {cast_columns} FROM batch_df;") # DuckDB will see batch_df
-                print(f"Batch {i+1}/{num_batches} inserted ({len(batch_df)} rows).")
+                log_and_print(f"Batch {i+1}/{num_batches} inserted ({len(batch_df)} rows) in {time.time() - t0:.2f}s.")
 
     except Exception as e:
-        print(f"An error occurred during DB table creation/insertion: {e}")
+        log_and_print(f"An error occurred during DB table creation/insertion: {e}", level='error')
         # Consider a rollback if inside a transaction for multiple inserts
         # con.execute("ROLLBACK;")
     finally:
         end_db_insert_time = time.time()
-        print(f'DuckDB table created/inserted in {end_db_insert_time - start_db_insert_time:.2f} seconds.')
+        log_and_print(f'DuckDB table created/inserted in {end_db_insert_time - start_db_insert_time:.2f} seconds.')
         con.close() # Close connection regardless of success/failure
 
     end_overall_time = time.time()
@@ -170,9 +189,7 @@ def create_credits():
     hours, remainder = divmod(elapsed_overall_time, 3600)
     minutes, seconds = divmod(remainder, 60)
 
-    print(f'Overall process completed for {total_movies_to_process} movies, fetching {total_cast_members_count} cast members.')
-    print(f'Total time elapsed: {int(hours)}h {int(minutes)}m {seconds:.2f}s')
-
-    con.close()
+    log_and_print(f'Overall process completed for {total_movies_to_process} movies, fetching {total_cast_members_count} cast members.')
+    log_and_print(f'Total time elapsed: {int(hours)}h {int(minutes)}m {seconds:.2f}s')
 
 create_credits()
