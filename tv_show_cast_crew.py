@@ -112,6 +112,24 @@ def create_tv_show_cast():
     print("DataFrame Info:")
     cast_df.info()
 
+    # --- LIMIT CREW MEMBERS PER SHOW TO 50 ---
+    if not cast_df.empty:
+        # Cast: known_for_department == 'Acting', Crew: everything else
+        cast_mask = cast_df['known_for_department'] == 'Acting'
+        crew_mask = ~cast_mask
+        cast_part = cast_df[cast_mask]
+        crew_part = cast_df[crew_mask]
+        # Limit crew to 50 per tv_id
+        crew_limited = (
+            crew_part.groupby('tv_id', group_keys=False)
+            .apply(lambda g: g.head(50))
+        )
+        # Combine back
+        cast_df = pd.concat([cast_part, crew_limited], ignore_index=True)
+        print("After limiting crew to 50 per show:")
+        print(cast_df.head())
+        print(f"Total rows after crew limit: {len(cast_df)}")
+
     print('Starting to create/insert into DuckDB table...')
     start_db_insert_time = time.time()
 
