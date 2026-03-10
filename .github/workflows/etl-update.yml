@@ -119,7 +119,7 @@ jobs:
         with:
           name: etl-diagnostics
           path: |
-            etl_diagnostics_*.log
+            *_diagnostics_*.log
             /tmp/snapshot_*.csv
           retention-days: 7
           if-no-files-found: warn
