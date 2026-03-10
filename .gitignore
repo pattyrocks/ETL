@@ -19,3 +19,10 @@ backups/
 
 .streamlit/secrets.toml
 __pycache__/
+
+# ETL diagnostic log files (generated at runtime)
+etl_diagnostics_*.log
+movies_diagnostics_*.log
+movie_cast_diagnostics_*.log
+movie_crew_diagnostics_*.log
+tv_shows_diagnostics_*.log

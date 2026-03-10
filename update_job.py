@@ -8,11 +8,36 @@ import math
 import argparse
 import logging
 import subprocess
+import psutil
 
 API_KEY = os.getenv('TMDBAPIKEY')
 MOTHERDUCK_TOKEN = os.getenv('MOTHERDUCK_TOKEN')
 MOTHERDUCK_DB = 'md:TMDB'
 TMDB_BASE = 'https://api.themoviedb.org/3'
+FETCH_BATCH_SIZE = 500  # Flush rows to DB every N processed items to guard against memory pressure
+
+# --- logging setup ---
+_log_file = f"etl_diagnostics_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(_log_file),
+        logging.StreamHandler(),
+    ]
+)
+logger = logging.getLogger(__name__)
+
+def log_and_print(message, level='info'):
+    """Log to file and print message to console at the given level."""
+    getattr(logger, level)(message)
+
+def log_memory_usage(label=''):
+    """Log current process memory usage."""
+    process = psutil.Process(os.getpid())
+    mem_mb = process.memory_info().rss / 1024 / 1024
+    tag = f" [{label}]" if label else ""
+    log_and_print(f"Memory usage{tag}: {mem_mb:.1f} MB", level='debug')
 
 # --- canonical column lists ---
 MOVIES_COLS = [
@@ -155,6 +180,7 @@ def call_changes(endpoint, start_date, end_date, max_pages=1000):
     url = f"{TMDB_BASE}/{endpoint}/changes"
     page = 1
     ids = []
+    call_start = time.time()
     while page <= max_pages:
         params = {
             'api_key': API_KEY,
@@ -163,7 +189,10 @@ def call_changes(endpoint, start_date, end_date, max_pages=1000):
             'page': page
         }
         try:
-            resp = requests.get(url, params=params)
+            req_start = time.time()
+            resp = requests.get(url, params=params, timeout=30)
+            req_elapsed = time.time() - req_start
+            log_and_print(f"API call: {endpoint}/changes page {page} completed in {req_elapsed:.2f}s", level='debug')
             resp.raise_for_status()
             data = resp.json()
             results = data.get('results', [])
@@ -175,34 +204,60 @@ def call_changes(endpoint, start_date, end_date, max_pages=1000):
             time.sleep(0.25)
         except requests.exceptions.HTTPError as he:
             status = getattr(he.response, 'status_code', None)
-            print(f"HTTPError on changes {endpoint} page {page}: {he} (status {status})")
+            log_and_print(f"HTTPError on changes {endpoint} page {page}: {he} (status {status})", level='error')
             if status == 429:
-                print("Rate limited, sleeping 2s then retrying...")
+                log_and_print("Rate limited, sleeping 2s then retrying...", level='warning')
                 time.sleep(2)
                 continue
             break
         except Exception as e:
-            print(f"Error calling changes {endpoint} page {page}: {e}")
+            log_and_print(f"Error calling changes {endpoint} page {page}: {e}", level='error')
             break
+    total_elapsed = time.time() - call_start
+    log_and_print(f"call_changes({endpoint}): retrieved {len(ids)} IDs across {page} page(s) in {total_elapsed:.2f}s")
     return ids
 
+def _fetch_with_retry(url, params, retries=3, timeout=30):
+    """Make an API GET request with retry logic, logging each attempt and response time."""
+    for attempt in range(1, retries + 1):
+        try:
+            req_start = time.time()
+            resp = requests.get(url, params=params, timeout=timeout)
+            elapsed = time.time() - req_start
+            log_and_print(f"API GET {url} attempt {attempt}/{retries}: HTTP {resp.status_code} in {elapsed:.2f}s", level='debug')
+            resp.raise_for_status()
+            return resp.json()
+        except requests.exceptions.RequestException as e:
+            log_and_print(f"API call failed (attempt {attempt}/{retries}) for {url}: {e}", level='warning')
+            if attempt < retries:
+                sleep_time = 2 ** attempt
+                log_and_print(f"Retrying in {sleep_time}s...", level='debug')
+                time.sleep(sleep_time)
+    log_and_print(f"API call failed after {retries} attempts: {url}", level='error')
+    return None
+
 def fetch_movie_detail_and_credits(movie_id):
-    try:
-        detail = requests.get(f"{TMDB_BASE}/movie/{movie_id}", params={'api_key':API_KEY}).json()
-        credits = requests.get(f"{TMDB_BASE}/movie/{movie_id}/credits", params={'api_key':API_KEY}).json()
-        return detail, credits
-    except Exception as e:
-        print(f"Movie fetch error {movie_id}: {e}")
+    fetch_start = time.time()
+    detail = _fetch_with_retry(f"{TMDB_BASE}/movie/{movie_id}", params={'api_key': API_KEY})
+    credits = _fetch_with_retry(f"{TMDB_BASE}/movie/{movie_id}/credits", params={'api_key': API_KEY})
+    elapsed = time.time() - fetch_start
+    if detail is None or credits is None:
+        log_and_print(f"Movie fetch error {movie_id}: one or more requests failed (total {elapsed:.2f}s)", level='error')
         return None, None
+    log_and_print(f"Fetched movie {movie_id} detail+credits in {elapsed:.2f}s", level='debug')
+    return detail, credits
 
 def fetch_tv_detail_and_aggregate(tv_id):
-    try:
-        detail = requests.get(f"{TMDB_BASE}/tv/{tv_id}", params={'api_key':API_KEY}).json()
-        agg = requests.get(f"{TMDB_BASE}/tv/{tv_id}/aggregate_credits", params={'api_key':API_KEY, 'language':'en-US'}).json()
-        return detail, agg
-    except Exception as e:
-        print(f"TV fetch error {tv_id}: {e}")
+    fetch_start = time.time()
+    detail = _fetch_with_retry(f"{TMDB_BASE}/tv/{tv_id}", params={'api_key': API_KEY})
+    agg = _fetch_with_retry(f"{TMDB_BASE}/tv/{tv_id}/aggregate_credits", params={'api_key': API_KEY, 'language': 'en-US'})
+    elapsed = time.time() - fetch_start
+    if detail is None or agg is None:
+        log_and_print(f"TV fetch error {tv_id}: one or more requests failed (total {elapsed:.2f}s)", level='error')
         return None, None
+    log_and_print(f"Fetched TV show {tv_id} detail+aggregate_credits in {elapsed:.2f}s", level='debug')
+    return detail, agg
+
 
 # --- ensure target tables exist with all columns ---
 def ensure_tables(con):
@@ -340,16 +395,28 @@ def ensure_tables(con):
         con.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS inserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;")
         con.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;")
 
+def _timed_execute(con, sql, label=''):
+    """Execute a SQL statement and log the elapsed time."""
+    tag = f" [{label}]" if label else ""
+    log_and_print(f"SQL{tag}: {sql.strip()}", level='debug')
+    t0 = time.time()
+    result = con.execute(sql)
+    elapsed = time.time() - t0
+    log_and_print(f"SQL{tag} completed in {elapsed:.3f}s", level='debug')
+    return result
+
 # --- upsert helpers ---
 def upsert_table_from_rows(con, rows, table_name, canonical_cols, key_col=None, dry_run=False):
     """
-    Upsert rows (list of dict) into table_nam
-    e using canonical_cols ordering.
+    Upsert rows (list of dict) into table_name using canonical_cols ordering.
     Preserves inserted_at from existing rows, sets updated_at to current timestamp.
     If dry_run is True, print what would be done, skip DB writes, and write a summary CSV preview.
     """
     if not rows:
         return
+
+    log_and_print(f"Upserting {len(rows)} rows into '{table_name}'...")
+    log_memory_usage(f"before upsert {table_name}")
 
     df = pd.DataFrame(rows)
     for c in df.columns:
@@ -402,11 +469,9 @@ def upsert_table_from_rows(con, rows, table_name, canonical_cols, key_col=None, 
         key = None
 
     if dry_run:
-        print(f"[DRY RUN] Would upsert {len(df_reindexed)} rows into {table_name}.")
+        log_and_print(f"[DRY RUN] Would upsert {len(df_reindexed)} rows into {table_name}.")
         # Write summary CSV preview
         import csv
-        import tempfile
-        from datetime import datetime
         preview_path = f"/tmp/update_job_{table_name}_preview_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
         with open(preview_path, "w", newline='') as f:
             writer = csv.writer(f)
@@ -419,75 +484,107 @@ def upsert_table_from_rows(con, rows, table_name, canonical_cols, key_col=None, 
             writer.writerow(list(sample.columns))
             for row in sample.itertuples(index=False):
                 writer.writerow(list(row))
-        print(f"[DRY RUN] Preview CSV written: {preview_path}")
+        log_and_print(f"[DRY RUN] Preview CSV written: {preview_path}")
         return
 
     con.register('tmp_df', df_reindexed)
+    upsert_start = time.time()
     try:
         # Preserve old inserted_at values before delete
         if key:
             # Qualify key column for all SQL statements
-            con.execute(f"""
+            _timed_execute(con, f"""
                 CREATE OR REPLACE TEMP TABLE old_inserted_at AS
                 SELECT o.{key}, o.inserted_at FROM {table_name} o
                 WHERE o.{key} IN (SELECT DISTINCT t.{key} FROM tmp_df t);
-            """)
-            con.execute(f"DELETE FROM {table_name} WHERE {key} IN (SELECT DISTINCT t.{key} FROM tmp_df t);")
+            """, label=f"save old inserted_at {table_name}")
+            _timed_execute(con, f"DELETE FROM {table_name} WHERE {key} IN (SELECT DISTINCT t.{key} FROM tmp_df t);",
+                           label=f"delete existing {table_name}")
 
         # Insert with preserved inserted_at (COALESCE to keep old value) and new updated_at
         insert_cols = ", ".join(canonical_cols)
         if key:
             # Qualify ambiguous columns in SELECT
             qualified_insert_cols = ", ".join([f"t.{col}" for col in canonical_cols])
-            con.execute(f"""
+            _timed_execute(con, f"""
                 INSERT INTO {table_name} ({insert_cols}, inserted_at, updated_at)
                 SELECT {qualified_insert_cols},
                        COALESCE(o.inserted_at, CURRENT_TIMESTAMP) AS inserted_at,
                        CURRENT_TIMESTAMP AS updated_at
                 FROM tmp_df t
                 LEFT JOIN old_inserted_at o ON t.{key} = o.{key};
-            """)
+            """, label=f"insert {table_name}")
         else:
-            con.execute(f"INSERT INTO {table_name} ({insert_cols}, inserted_at, updated_at) SELECT {insert_cols}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP FROM tmp_df;")
+            _timed_execute(con, f"INSERT INTO {table_name} ({insert_cols}, inserted_at, updated_at) SELECT {insert_cols}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP FROM tmp_df;",
+                           label=f"insert {table_name}")
     finally:
         try:
             con.unregister('tmp_df')
         except Exception:
             pass
         try:
-            con.execute("DROP TABLE IF EXISTS old_inserted_at;")
+            _timed_execute(con, "DROP TABLE IF EXISTS old_inserted_at;", label=f"cleanup {table_name}")
         except Exception:
             pass
+    upsert_elapsed = time.time() - upsert_start
+    log_and_print(f"Upsert '{table_name}' ({len(df_reindexed)} rows) completed in {upsert_elapsed:.3f}s")
+    log_memory_usage(f"after upsert {table_name}")
 
 def _format_seconds(s: float) -> str:
     hrs, rem = divmod(s, 3600)
     mins, secs = divmod(rem, 60)
     return f"{int(hrs)}h {int(mins)}m {secs:.2f}s"
 
+SNAPSHOT_SAMPLE_ROWS = 1000  # Max rows to fetch per snapshot to limit memory usage
+
+def save_snapshot(con, table_name, label=''):
+    """Save a diagnostic sample snapshot of a database table to a CSV file.
+
+    Only the first SNAPSHOT_SAMPLE_ROWS rows are fetched to avoid loading the
+    full table into memory (which could be tens-of-thousands of rows for large
+    tables like movies or movie_cast).
+    """
+    tag = label or datetime.now().strftime('%Y%m%d_%H%M%S')
+    snapshot_path = f"/tmp/snapshot_{table_name}_{tag}.csv"
+    try:
+        total_rows = con.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
+        log_and_print(
+            f"Snapshot: '{table_name}' has {total_rows} total rows; "
+            f"saving sample of up to {SNAPSHOT_SAMPLE_ROWS} rows to {snapshot_path}"
+        )
+        df = con.execute(f"SELECT * FROM {table_name} LIMIT {SNAPSHOT_SAMPLE_ROWS}").fetchdf()
+        df.to_csv(snapshot_path, index=False)
+        log_and_print(f"Snapshot of '{table_name}' ({len(df)}/{total_rows} rows) saved to {snapshot_path}")
+    except Exception as e:
+        log_and_print(f"Failed to save snapshot for '{table_name}': {e}", level='error')
+
 def run(sample_only=0, force_days=None, dry_run=False):
     run_start = time.time()
+    log_and_print(f"ETL job starting. Log file: {_log_file}")
+    log_memory_usage("job start")
 
     # Connect to MotherDuck
+    conn_start = time.time()
     con = get_connection()
-    print("✓ Connected to MotherDuck")
+    log_and_print(f"✓ Connected to MotherDuck in {time.time() - conn_start:.2f}s")
 
     # Ensure tables exist
     ensure_tables(con)
 
     if dry_run:
-        print("\n--- DRY RUN: No database writes will be performed ---")
+        log_and_print("\n--- DRY RUN: No database writes will be performed ---")
     else:
-        print("\n--- Live run: TMDB_backup mirror created by backup_to_glacier.py before this step ---")
+        log_and_print("\n--- Live run: TMDB_backup mirror created by backup_to_glacier.py before this step ---")
 
 
     # Determine last_run
     if force_days is not None:
         last_run = datetime.now(timezone.utc) - timedelta(days=force_days)
-        print(f"Forcing update: fetching changes from last {force_days} days")
+        log_and_print(f"Forcing update: fetching changes from last {force_days} days")
     else:
         last_run = get_last_run(con)
     now = datetime.now(timezone.utc)
-    print(f"Last run: {last_run.isoformat()}, now: {now.isoformat()}")
+    log_and_print(f"Last run: {last_run.isoformat()}, now: {now.isoformat()}")
 
     movie_ids = call_changes('movie', last_run, now)
     tv_ids = call_changes('tv', last_run, now)
@@ -497,7 +594,7 @@ def run(sample_only=0, force_days=None, dry_run=False):
         tv_ids = tv_ids[:sample_only]
 
     total_changes = len(movie_ids) + len(tv_ids)
-    print(f"Found {len(movie_ids)} changed movies, {len(tv_ids)} changed tv shows (total changes: {total_changes})")
+    log_and_print(f"Found {len(movie_ids)} changed movies, {len(tv_ids)} changed tv shows (total changes: {total_changes})")
 
     # Fetch details phase
     fetch_start = time.time()
@@ -511,13 +608,13 @@ def run(sample_only=0, force_days=None, dry_run=False):
             elapsed = time.time() - movie_fetch_start
             forecast_total = (elapsed / i) * len(movie_ids)
             remaining = forecast_total - elapsed
-            print(
+            log_and_print(
                 f"  Movies: {pct}% ({i}/{len(movie_ids)} of {len(movie_ids)} total to upsert) | "
                 f"elapsed: {_format_seconds(elapsed)} | "
                 f"remaining: ~{_format_seconds(remaining)} | "
-                f"ETA: {(datetime.now() + timedelta(seconds=remaining)).strftime('%H:%M:%S UTC')}",
-                flush=True
+                f"ETA: {(datetime.now() + timedelta(seconds=remaining)).strftime('%H:%M:%S UTC')}"
             )
+            log_memory_usage(f"movies fetch {pct}%")
         detail, credits = fetch_movie_detail_and_credits(mid)
         if not detail:
             continue
@@ -557,6 +654,16 @@ def run(sample_only=0, force_days=None, dry_run=False):
         processed_movie_count += 1
         time.sleep(0.12)
 
+        # Process and flush in batches to guard against memory pressure
+        if not dry_run and processed_movie_count % FETCH_BATCH_SIZE == 0:
+            log_and_print(f"Batch flush: upserting rows after processing {processed_movie_count} movie records")
+            log_memory_usage(f"before batch flush at movie {processed_movie_count}")
+            upsert_table_from_rows(con, movies_rows, 'movies', MOVIES_COLS, key_col='id', dry_run=dry_run)
+            upsert_table_from_rows(con, movie_cast_rows, 'movie_cast', MOVIE_CAST_COLS, key_col='movie_id', dry_run=dry_run)
+            upsert_table_from_rows(con, movie_crew_rows, 'movie_crew', MOVIE_CREW_COLS, key_col='movie_id', dry_run=dry_run)
+            movies_rows, movie_cast_rows, movie_crew_rows = [], [], []
+            log_memory_usage(f"after batch flush at movie {processed_movie_count}")
+
     tv_rows, tv_cast_rows = [], []
     processed_tv_count = 0
     milestones = {int(len(tv_ids) * p) for p in [0.25, 0.50, 0.75, 1.0]}
@@ -567,13 +674,13 @@ def run(sample_only=0, force_days=None, dry_run=False):
             elapsed = time.time() - tv_fetch_start
             forecast_total = (elapsed / i) * len(tv_ids)
             remaining = forecast_total - elapsed
-            print(
+            log_and_print(
                 f"  TV shows: {pct}% ({i}/{len(tv_ids)} of {len(tv_ids)} total to upsert) | "
                 f"elapsed: {_format_seconds(elapsed)} | "
                 f"remaining: ~{_format_seconds(remaining)} | "
-                f"ETA: {(datetime.now() + timedelta(seconds=remaining)).strftime('%H:%M:%S UTC')}",
-                flush=True
+                f"ETA: {(datetime.now() + timedelta(seconds=remaining)).strftime('%H:%M:%S UTC')}"
             )
+            log_memory_usage(f"tv fetch {pct}%")
         detail, agg = fetch_tv_detail_and_aggregate(tid)
         if not detail:
             continue
@@ -601,19 +708,28 @@ def run(sample_only=0, force_days=None, dry_run=False):
         processed_tv_count += 1
         time.sleep(0.12)
 
+        # Process and flush in batches to guard against memory pressure
+        if not dry_run and processed_tv_count % FETCH_BATCH_SIZE == 0:
+            log_and_print(f"Batch flush: upserting rows after processing {processed_tv_count} TV show records")
+            log_memory_usage(f"before batch flush at tv {processed_tv_count}")
+            upsert_table_from_rows(con, tv_rows, 'tv_shows', TV_SHOWS_COLS, key_col='id', dry_run=dry_run)
+            upsert_table_from_rows(con, tv_cast_rows, 'tv_show_cast_crew', TV_CAST_COLS, key_col='tv_id', dry_run=dry_run)
+            tv_rows, tv_cast_rows = [], []
+            log_memory_usage(f"after batch flush at tv {processed_tv_count}")
+
     # MotherDuck connection health check before upsert phase
-    print("Checking MotherDuck connection before upsert phase...")
+    log_and_print("Checking MotherDuck connection before upsert phase...")
     try:
         con.execute("SELECT 1").fetchone()
-        print("✓ MotherDuck connection alive — proceeding to upsert phase")
+        log_and_print("✓ MotherDuck connection alive — proceeding to upsert phase")
     except Exception as e:
-        print(f"⚠️ MotherDuck connection was stale ({e}) — reconnecting...")
+        log_and_print(f"⚠️ MotherDuck connection was stale ({e}) — reconnecting...", level='warning')
         try:
             con.close()
         except Exception:
             pass
         con = get_connection()
-        print("✓ MotherDuck reconnected successfully")
+        log_and_print("✓ MotherDuck reconnected successfully")
 
     fetch_end = time.time()
     fetch_elapsed = fetch_end - fetch_start
@@ -621,62 +737,67 @@ def run(sample_only=0, force_days=None, dry_run=False):
     avg_per_item = fetch_elapsed / processed_count if processed_count > 0 else 0
     predicted_fetch_total = avg_per_item * total_changes
 
-    print(f"Fetch phase: processed {processed_count} items in {_format_seconds(fetch_elapsed)} (avg {_format_seconds(avg_per_item)} per item)")
+    log_and_print(f"Fetch phase: processed {processed_count} items in {_format_seconds(fetch_elapsed)} (avg {_format_seconds(avg_per_item)} per item)")
     if sample_only and sample_only > 0 and processed_count < total_changes:
-        print(f"Prediction: estimated full fetch time for {total_changes} items is {_format_seconds(predicted_fetch_total)} based on sample")
+        log_and_print(f"Prediction: estimated full fetch time for {total_changes} items is {_format_seconds(predicted_fetch_total)} based on sample")
 
-    # Upsert phase
-    upsert_start = time.time()
-    
+    log_memory_usage("before final upsert phase")
+
+    # Upsert phase (remaining rows not yet flushed in batch)
+    upsert_phase_start = time.time()
+
     upsert_table_from_rows(con, movies_rows, 'movies', MOVIES_COLS, key_col='id', dry_run=dry_run)
     upsert_table_from_rows(con, movie_cast_rows, 'movie_cast', MOVIE_CAST_COLS, key_col='movie_id', dry_run=dry_run)
     upsert_table_from_rows(con, movie_crew_rows, 'movie_crew', MOVIE_CREW_COLS, key_col='movie_id', dry_run=dry_run)
     upsert_table_from_rows(con, tv_rows, 'tv_shows', TV_SHOWS_COLS, key_col='id', dry_run=dry_run)
     upsert_table_from_rows(con, tv_cast_rows, 'tv_show_cast_crew', TV_CAST_COLS, key_col='tv_id', dry_run=dry_run)
+
     if not dry_run:
         set_last_run(con, now)
     else:
-        print("[DRY RUN] Would update last_run in DB.")
+        log_and_print("[DRY RUN] Would update last_run in DB.")
 
-    upsert_end = time.time()
-    upsert_elapsed = upsert_end - upsert_start
+    upsert_elapsed = time.time() - upsert_phase_start
 
     run_end = time.time()
     total_elapsed = run_end - run_start
 
-    print(f"DB upsert phase took {_format_seconds(upsert_elapsed)}")
-    print(f"Total run time: {_format_seconds(total_elapsed)}")
+    log_and_print(f"DB upsert phase took {_format_seconds(upsert_elapsed)}")
+    log_and_print(f"Total run time: {_format_seconds(total_elapsed)}")
+    log_memory_usage("job end")
 
     if sample_only and sample_only > 0 and processed_count > 0:
         estimated_total_run = predicted_fetch_total + upsert_elapsed
-        print(f"Estimated total run time for full dataset ({total_changes} items): {_format_seconds(estimated_total_run)} (based on sample)")
+        log_and_print(f"Estimated total run time for full dataset ({total_changes} items): {_format_seconds(estimated_total_run)} (based on sample)")
+
+    # Save diagnostic snapshots of critical tables (outside upsert timing to keep measurements clean)
+    snapshot_tag = datetime.now().strftime('%Y%m%d_%H%M%S')
+    for tbl in ['movies', 'movie_cast', 'tv_shows']:
+        save_snapshot(con, tbl, label=snapshot_tag)
 
     con.close()
-    print("\n✓ Update complete!")
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+    log_and_print(f"\n✓ Update complete! Full diagnostics written to {_log_file}")
 
 def backup_to_glacier():
-    logging.info("Starting backup to Glacier...")
+    log_and_print("Starting backup to Glacier...")
     try:
         script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "backup_to_glacier.py")
         subprocess.run(
             ["python", script_path],
             check=True,
         )
-        logging.info("Backup to Glacier completed successfully.")
+        log_and_print("Backup to Glacier completed successfully.")
     except subprocess.TimeoutExpired:
-        logging.error("Backup timed out after 30 minutes — possibly hit MotherDuck compute limit.")
+        log_and_print("Backup timed out after 30 minutes — possibly hit MotherDuck compute limit.", level='error')
         return False
     except subprocess.CalledProcessError as e:
-        logging.error("Backup to Glacier failed: %s", e)
+        log_and_print(f"Backup to Glacier failed: {e}", level='error')
         return False
     return True
 
 def run_update_with_backup(sample_only=0, force_days=None, dry_run=False):
     # Backup runs as a separate Thursday workflow — skipped here
-    logging.info("Backup handled by separate scheduled workflow. Proceeding with update...")
+    log_and_print("Backup handled by separate scheduled workflow. Proceeding with update...")
     run(sample_only=sample_only, force_days=force_days, dry_run=dry_run)
 
 
