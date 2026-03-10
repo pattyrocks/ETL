@@ -121,6 +121,7 @@ def add_info_to_movies_parallel(max_workers=8):
                 continue
             selected_df = result
             try:
+                t0 = time.time()
                 con.execute(f'''
                     UPDATE movies
                     SET
@@ -157,7 +158,7 @@ def add_info_to_movies_parallel(max_workers=8):
                 elapsed_time = end_time - start_time
                 minutes = int(elapsed_time // 60)
                 remaining_seconds = elapsed_time % 60
-                log_and_print(f'Successfully updated data for movie ID {selected_df["id"].values[0]}. Processed {processed_count} records in {minutes}m{remaining_seconds:.2f}s')
+                log_and_print(f'Successfully updated data for movie ID {selected_df["id"].values[0]} (query: {time.time()-t0:.3f}s). Processed {processed_count} records in {minutes}m{remaining_seconds:.2f}s')
             except Exception as e:
                 log_and_print(f"ERROR: Could not update movie ID {selected_df['id'].values[0]}: {e}", level='error')
                 skipped_ids.append(selected_df['id'].values[0])
