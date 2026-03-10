@@ -190,7 +190,7 @@ def call_changes(endpoint, start_date, end_date, max_pages=1000):
         }
         try:
             req_start = time.time()
-            resp = requests.get(url, params=params)
+            resp = requests.get(url, params=params, timeout=30)
             req_elapsed = time.time() - req_start
             log_and_print(f"API call: {endpoint}/changes page {page} completed in {req_elapsed:.2f}s", level='debug')
             resp.raise_for_status()
