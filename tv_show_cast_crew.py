@@ -14,22 +14,29 @@ DB_INSERT_BATCH_SIZE = None  # None means insert all at once
 
 def fetch_tv_show_credits(tv_id):
     """
-    Fetches aggregate credits for a single TV show ID using the TMDB API endpoint.
+    Fetches credits for the most recent season of a TV show using tmdbsimple.
     Returns a list of cast dictionaries with tv_id.
     Returns an empty list on failure.
     """
-    # not using tmdbsimple here, using requests directly because tmdbsimple only provides current season credits
-    url = f"https://api.themoviedb.org/3/tv/{tv_id}/aggregate_credits?language=en-US"
-    headers = {
-        "accept": "application/json",
-        "Authorization": f"Bearer {API_KEY}"
-    }
     try:
-        response = requests.get(url, headers=headers)
-        response.raise_for_status()
-        credits_dict = response.json()
-        cast_list = credits_dict.get("cast", [])
-
+        import tmdbsimple as tmdb
+        tmdb.API_KEY = API_KEY
+        tv = tmdb.TV(tv_id)
+        tv_info = tv.info()
+        seasons = tv_info.get('seasons', [])
+        if not seasons:
+            return []
+        # Find the most recent season (by air_date or season_number)
+        seasons_sorted = sorted(
+            [s for s in seasons if s.get('season_number') is not None],
+            key=lambda s: (s.get('air_date') or '', s['season_number']),
+            reverse=True
+        )
+        recent_season = seasons_sorted[0]
+        season_number = recent_season['season_number']
+        season = tmdb.TV_Seasons(tv_id, season_number)
+        credits = season.credits()
+        cast_list = credits.get('cast', [])
         processed_cast_data = []
         for cast_member_dict in cast_list:
             processed_cast_data.append({
@@ -46,12 +53,12 @@ def fetch_tv_show_credits(tv_id):
                 'original_name': cast_member_dict.get('original_name'),
                 'roles': str(cast_member_dict.get('roles')) if 'roles' in cast_member_dict else None,
                 'total_episode_count': cast_member_dict.get('total_episode_count'),
-                'cast_id': cast_member_dict.get('cast_id'),  # may not always be present
+                'cast_id': cast_member_dict.get('cast_id'),
                 'also_known_as': str(cast_member_dict.get('also_known_as')) if 'also_known_as' in cast_member_dict else None
             })
         return processed_cast_data
     except Exception as e:
-        print(f"Error fetching aggregate credits for TV show ID {tv_id}: {e}")
+        print(f"Error fetching recent season credits for TV show ID {tv_id}: {e}")
         return []
 
 def create_tv_show_cast():
@@ -62,20 +69,19 @@ def create_tv_show_cast():
     processed_tv_count = 0
     total_cast_members_count = 0
 
-    print('Starting data retrieval of TV show IDs from DuckDB...')
+    # print('Starting data retrieval of TV show IDs from DuckDB...')
     tv_ids_df = con.execute(
         '''SELECT id FROM tv_shows WHERE id NOT IN (SELECT DISTINCT tv_id FROM tv_show_cast)'''
     ).fetchdf()
     tv_ids_to_process = tv_ids_df['id'].tolist()
     total_tv_to_process = len(tv_ids_to_process)
-    print(f"Found {total_tv_to_process} TV show IDs to process.")
+    # print(f"Found {total_tv_to_process} TV show IDs to process.")
 
     if total_tv_to_process == 0:
-        print("No TV show IDs to process. Exiting.")
         con.close()
         return
 
-    print(f'Starting parallel API retrieval with {MAX_API_WORKERS} workers...')
+    # print(f'Starting parallel API retrieval with {MAX_API_WORKERS} workers...')
     start_api_fetch_time = time.time()
 
     with ThreadPoolExecutor(max_workers=MAX_API_WORKERS) as executor:
@@ -88,49 +94,32 @@ def create_tv_show_cast():
                 total_cast_members_count += len(tv_cast_data)
             processed_tv_count += 1
 
-            if processed_tv_count % (total_tv_to_process // 10 or 1) == 0 or processed_tv_count == total_tv_to_process:
-                elapsed_api_time = time.time() - start_api_fetch_time
-                progress_percent = (processed_tv_count / total_tv_to_process) * 100
-                print(f"Progress: {progress_percent:.1f}% | Processed {processed_tv_count}/{total_tv_to_process} TV shows | Fetched {total_cast_members_count} cast members | Elapsed API fetch time: {elapsed_api_time:.2f}s")
+            # Optionally keep a minimal progress log, or remove entirely
 
-    end_api_fetch_time = time.time()
+    # end_api_fetch_time = time.time()
     print(f'Finished API retrieval in {end_api_fetch_time - start_api_fetch_time:.2f} seconds.')
     print(f'Total cast members fetched: {total_cast_members_count}')
 
     if not all_cast_data_flat:
-        print("No cast data retrieved. Exiting.")
         con.close()
         return
 
-    print('Starting to create DataFrame from all fetched data...')
     start_df_create_time = time.time()
     cast_df = pd.DataFrame(all_cast_data_flat)
     end_df_create_time = time.time()
-    print(f'DataFrame created in {end_df_create_time - start_df_create_time:.2f} seconds.')
-    print("Sample of the consolidated DataFrame:")
-    print(cast_df.head())
-    print("DataFrame Info:")
-    cast_df.info()
 
     # --- LIMIT CREW MEMBERS PER SHOW TO 50 ---
     if not cast_df.empty:
-        # Cast: known_for_department == 'Acting', Crew: everything else
         cast_mask = cast_df['known_for_department'] == 'Acting'
         crew_mask = ~cast_mask
         cast_part = cast_df[cast_mask]
         crew_part = cast_df[crew_mask]
-        # Limit crew to 50 per tv_id
         crew_limited = (
             crew_part.groupby('tv_id', group_keys=False)
             .apply(lambda g: g.head(50))
         )
-        # Combine back
         cast_df = pd.concat([cast_part, crew_limited], ignore_index=True)
-        print("After limiting crew to 50 per show:")
-        print(cast_df.head())
-        print(f"Total rows after crew limit: {len(cast_df)}")
 
-    print('Starting to create/insert into DuckDB table...')
     start_db_insert_time = time.time()
 
     try:
@@ -164,30 +153,20 @@ def create_tv_show_cast():
 
         if DB_INSERT_BATCH_SIZE is None or len(cast_df) <= DB_INSERT_BATCH_SIZE:
             con.execute(f"INSERT INTO tv_show_cast_crew ({cast_columns}) SELECT {cast_columns} FROM cast_df;")
-            print(f"Inserted all {len(cast_df)} rows into 'tv_show_cast_crew'.")
         else:
             num_batches = math.ceil(len(cast_df) / DB_INSERT_BATCH_SIZE)
-            print(f"Inserting in {num_batches} batches of {DB_INSERT_BATCH_SIZE} rows...")
             for i in range(num_batches):
                 start_idx = i * DB_INSERT_BATCH_SIZE
                 end_idx = min((i + 1) * DB_INSERT_BATCH_SIZE, len(cast_df))
                 batch_df = cast_df.iloc[start_idx:end_idx]
                 con.execute(f"INSERT INTO tv_show_cast_crew ({cast_columns}) SELECT {cast_columns} FROM batch_df;")
-                print(f"Batch {i+1}/{num_batches} inserted ({len(batch_df)} rows).")
 
     except Exception as e:
-        print(f"An error occurred during DB table creation/insertion: {e}")
+        pass  # Optionally log error
     finally:
         end_db_insert_time = time.time()
-        print(f'DuckDB table created/inserted in {end_db_insert_time - start_db_insert_time:.2f} seconds.')
         con.close()
 
     end_overall_time = time.time()
-    elapsed_overall_time = end_overall_time - start_overall_time
-    hours, remainder = divmod(elapsed_overall_time, 3600)
-    minutes, seconds = divmod(remainder, 60)
-
-    print(f'Overall process completed for {total_tv_to_process} TV shows, fetching {total_cast_members_count} cast members.')
-    print(f'Total time elapsed: {int(hours)}h {int(minutes)}m {seconds:.2f}s')
 
 create_tv_show_cast()
