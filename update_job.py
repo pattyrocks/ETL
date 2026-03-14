@@ -558,9 +558,12 @@ def save_snapshot(con, table_name, label=''):
     except Exception as e:
         log_and_print(f"Failed to save snapshot for '{table_name}': {e}", level='error')
 
-def run(sample_only=0, force_days=None, dry_run=False):
+def run(sample_only=0, force_days=None, dry_run=False, time_budget=0):
     run_start = time.time()
-    log_and_print(f"ETL job starting. Log file: {_log_file}")
+    if time_budget > 0:
+        log_and_print(f"ETL job starting with time budget of {_format_seconds(time_budget)}. Log file: {_log_file}")
+    else:
+        log_and_print(f"ETL job starting. Log file: {_log_file}")
     log_memory_usage("job start")
 
     # Connect to MotherDuck
@@ -598,6 +601,7 @@ def run(sample_only=0, force_days=None, dry_run=False):
 
     # Fetch details phase
     fetch_start = time.time()
+    budget_exceeded = False
     movies_rows, movie_cast_rows, movie_crew_rows = [], [], []
     processed_movie_count = 0
     milestones = {int(len(movie_ids) * p) for p in [0.25, 0.50, 0.75, 1.0]}
@@ -654,6 +658,23 @@ def run(sample_only=0, force_days=None, dry_run=False):
         processed_movie_count += 1
         time.sleep(0.12)
 
+        # Check time budget before continuing
+        if time_budget > 0 and (time.time() - run_start) >= time_budget:
+            log_and_print(
+                f"⚠️ Time budget of {_format_seconds(time_budget)} reached after {processed_movie_count} movies "
+                f"({processed_movie_count}/{len(movie_ids)} processed) — stopping fetch phase early.",
+                level='warning'
+            )
+            budget_exceeded = True
+            # Flush any accumulated rows before exiting the loop
+            if not dry_run and movies_rows:
+                log_and_print(f"Flushing {len(movies_rows)} remaining movie rows due to time budget cutoff")
+                upsert_table_from_rows(con, movies_rows, 'movies', MOVIES_COLS, key_col='id', dry_run=dry_run)
+                upsert_table_from_rows(con, movie_cast_rows, 'movie_cast', MOVIE_CAST_COLS, key_col='movie_id', dry_run=dry_run)
+                upsert_table_from_rows(con, movie_crew_rows, 'movie_crew', MOVIE_CREW_COLS, key_col='movie_id', dry_run=dry_run)
+                movies_rows, movie_cast_rows, movie_crew_rows = [], [], []
+            break
+
         # Process and flush in batches to guard against memory pressure
         if not dry_run and processed_movie_count % FETCH_BATCH_SIZE == 0:
             log_and_print(f"Batch flush: upserting rows after processing {processed_movie_count} movie records")
@@ -669,6 +690,8 @@ def run(sample_only=0, force_days=None, dry_run=False):
     milestones = {int(len(tv_ids) * p) for p in [0.25, 0.50, 0.75, 1.0]}
     tv_fetch_start = time.time()
     for i, tid in enumerate(tv_ids):
+        if budget_exceeded:
+            break
         if i in milestones and i > 0:
             pct = round(i / len(tv_ids) * 100)
             elapsed = time.time() - tv_fetch_start
@@ -708,6 +731,22 @@ def run(sample_only=0, force_days=None, dry_run=False):
         processed_tv_count += 1
         time.sleep(0.12)
 
+        # Check time budget before continuing
+        if time_budget > 0 and (time.time() - run_start) >= time_budget:
+            log_and_print(
+                f"⚠️ Time budget of {_format_seconds(time_budget)} reached after {processed_tv_count} TV shows "
+                f"({processed_tv_count}/{len(tv_ids)} processed) — stopping fetch phase early.",
+                level='warning'
+            )
+            budget_exceeded = True
+            # Flush any accumulated rows before exiting the loop
+            if not dry_run and tv_rows:
+                log_and_print(f"Flushing {len(tv_rows)} remaining TV show rows due to time budget cutoff")
+                upsert_table_from_rows(con, tv_rows, 'tv_shows', TV_SHOWS_COLS, key_col='id', dry_run=dry_run)
+                upsert_table_from_rows(con, tv_cast_rows, 'tv_show_cast_crew', TV_CAST_COLS, key_col='tv_id', dry_run=dry_run)
+                tv_rows, tv_cast_rows = [], []
+            break
+
         # Process and flush in batches to guard against memory pressure
         if not dry_run and processed_tv_count % FETCH_BATCH_SIZE == 0:
             log_and_print(f"Batch flush: upserting rows after processing {processed_tv_count} TV show records")
@@ -738,7 +777,15 @@ def run(sample_only=0, force_days=None, dry_run=False):
     predicted_fetch_total = avg_per_item * total_changes
 
     log_and_print(f"Fetch phase: processed {processed_count} items in {_format_seconds(fetch_elapsed)} (avg {_format_seconds(avg_per_item)} per item)")
-    if sample_only and sample_only > 0 and processed_count < total_changes:
+    if budget_exceeded:
+        skipped = total_changes - processed_count
+        log_and_print(
+            f"⚠️ Partial run: processed {processed_count}/{total_changes} items "
+            f"({skipped} skipped due to time budget). "
+            f"last_run will be advanced to now so the next scheduled run picks up new changes.",
+            level='warning'
+        )
+    elif sample_only and sample_only > 0 and processed_count < total_changes:
         log_and_print(f"Prediction: estimated full fetch time for {total_changes} items is {_format_seconds(predicted_fetch_total)} based on sample")
 
     log_memory_usage("before final upsert phase")
@@ -776,7 +823,10 @@ def run(sample_only=0, force_days=None, dry_run=False):
         save_snapshot(con, tbl, label=snapshot_tag)
 
     con.close()
-    log_and_print(f"\n✓ Update complete! Full diagnostics written to {_log_file}")
+    if budget_exceeded:
+        log_and_print(f"\n⚠️ Partial update complete (time budget reached). {processed_count}/{total_changes} items processed. Full diagnostics written to {_log_file}")
+    else:
+        log_and_print(f"\n✓ Update complete! Full diagnostics written to {_log_file}")
 
 def backup_to_glacier():
     log_and_print("Starting backup to Glacier...")
@@ -795,10 +845,10 @@ def backup_to_glacier():
         return False
     return True
 
-def run_update_with_backup(sample_only=0, force_days=None, dry_run=False):
+def run_update_with_backup(sample_only=0, force_days=None, dry_run=False, time_budget=0):
     # Backup runs as a separate Thursday workflow — skipped here
     log_and_print("Backup handled by separate scheduled workflow. Proceeding with update...")
-    run(sample_only=sample_only, force_days=force_days, dry_run=dry_run)
+    run(sample_only=sample_only, force_days=force_days, dry_run=dry_run, time_budget=time_budget)
 
 
 if __name__ == '__main__':
@@ -807,6 +857,9 @@ if __name__ == '__main__':
     parser.add_argument('--force', type=int, default=None, metavar='DAYS',
                         help='Ignore stored last_run and fetch changes from DAYS ago (e.g., --force 30 for last 30 days, --force 7 for last week)')
     parser.add_argument('--dry-run', action='store_true', help='Run without writing to the database (for manual testing)')
+    parser.add_argument('--time-budget', type=int, default=0, metavar='SECONDS',
+                        help='Stop processing after this many seconds and flush what has been collected (0 = no limit). '
+                             'Use to avoid being hard-killed by CI job time limits (e.g., 19800 for 5h30m).')
     args = parser.parse_args()
 
-    run_update_with_backup(sample_only=args.sample, force_days=args.force, dry_run=args.dry_run)
+    run_update_with_backup(sample_only=args.sample, force_days=args.force, dry_run=args.dry_run, time_budget=args.time_budget)

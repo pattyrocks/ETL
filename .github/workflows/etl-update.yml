@@ -13,6 +13,10 @@ on:
         description: 'Sample size for testing (0 = full)'
         required: false
         default: '10'
+      time_budget:
+        description: 'Time budget in seconds before graceful early exit (0 = no limit; default 19800 = 5h30m)'
+        required: false
+        default: '19800'
 
 jobs:
   update:
@@ -97,6 +101,7 @@ jobs:
           set -euo pipefail
           DRY="${{ github.event.inputs.dry_run || 'false' }}"
           SAMPLE="${{ github.event.inputs.sample || '0' }}"
+          BUDGET="${{ github.event.inputs.time_budget || '19800' }}"
           if [ "$DRY" = "true" ]; then
             echo "Running dry-run (sample=$SAMPLE)"
             if [ "$SAMPLE" != "0" ]; then
@@ -105,11 +110,11 @@ jobs:
               python update_job.py --dry-run
             fi
           else
-            echo "Running live update (sample=$SAMPLE)"
+            echo "Running live update (sample=$SAMPLE, time-budget=${BUDGET}s)"
             if [ "$SAMPLE" != "0" ]; then
-              python update_job.py --sample="$SAMPLE"
+              python update_job.py --sample="$SAMPLE" --time-budget="$BUDGET"
             else
-              python update_job.py
+              python update_job.py --time-budget="$BUDGET"
             fi
           fi
 
