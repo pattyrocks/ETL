@@ -6,20 +6,47 @@ on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: 'Run as dry-run? true/false'
+        description: 'Run without writing to database'
         required: false
-        default: 'true'
-      sample:
-        description: 'Sample size for testing (0 = full)'
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+      sample_size:
+        description: 'Process only N items per step (0 = all)'
         required: false
-        default: '10'
+        default: '0'
+        type: string
+      skip_discover:
+        description: 'Skip ID discovery from TMDB exports'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+      skip_info:
+        description: 'Skip info update for movies/TV shows'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+      skip_cast_crew:
+        description: 'Skip cast/crew update'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
 
 jobs:
   update:
     runs-on: ubuntu-latest
-    timeout-minutes: 3000
-    env:
-      ACTIONS_RUNNER_DEBUG: true
+    timeout-minutes: 360
 
     steps:
       - name: Checkout repo
@@ -35,27 +62,16 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Print debug environment info
+      - name: Check required secrets are set
         run: |
-          echo "=== Debug Environment Info ==="
-          echo "Runner OS: $RUNNER_OS"
-          echo "Python version: $(python --version)"
-          echo "Pip packages:"
-          pip list
-          echo "Disk space:"
-          df -h
-          echo "Memory:"
-          free -h || true
-          echo "CPU info:"
-          nproc
-          echo "=============================="
-
-      - name: Check secrets are set
-        run: |
-          [ -n "$AWS_ACCESS_KEY_ID" ] && echo "AWS_ACCESS_KEY_ID: set" || echo "AWS_ACCESS_KEY_ID: MISSING"
-          [ -n "$AWS_SECRET_ACCESS_KEY" ] && echo "AWS_SECRET_ACCESS_KEY: set" || echo "AWS_SECRET_ACCESS_KEY: MISSING"
-          [ -n "$S3_BUCKET_NAME" ] && echo "S3_BUCKET_NAME: set" || echo "S3_BUCKET_NAME: MISSING"
+          [ -n "$TMDBAPIKEY" ] && echo "TMDBAPIKEY: set" || (echo "TMDBAPIKEY: MISSING" && exit 1)
+          [ -n "$MOTHERDUCK_TOKEN" ] && echo "MOTHERDUCK_TOKEN: set" || (echo "MOTHERDUCK_TOKEN: MISSING" && exit 1)
+          [ -n "$AWS_ACCESS_KEY_ID" ] && echo "AWS_ACCESS_KEY_ID: set" || (echo "AWS_ACCESS_KEY_ID: MISSING" && exit 1)
+          [ -n "$AWS_SECRET_ACCESS_KEY" ] && echo "AWS_SECRET_ACCESS_KEY: set" || (echo "AWS_SECRET_ACCESS_KEY: MISSING" && exit 1)
+          [ -n "$S3_BUCKET_NAME" ] && echo "S3_BUCKET_NAME: set" || (echo "S3_BUCKET_NAME: MISSING" && exit 1)
         env:
+          TMDBAPIKEY: ${{ secrets.TMDBAPIKEY }}
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           S3_BUCKET_NAME: ${{ secrets.S3_BUCKET_NAME }}
@@ -64,27 +80,37 @@ jobs:
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION || 'us-east-1' }}
           S3_BUCKET_NAME: ${{ secrets.S3_BUCKET_NAME }}
         run: |
-          pip install awscli --quiet
-          LATEST=$(aws s3 ls s3://$S3_BUCKET_NAME/duckdb_backup_ \
-            --region ap-south-1 \
-            | sort \
-            | tail -n 1)
+          LATEST=$(aws s3 ls "s3://$S3_BUCKET_NAME/" | grep "duckdb_backup_" | sort | tail -n 1)
           if [ -z "$LATEST" ]; then
-            echo "❌ No backup found in S3 — halting ETL for safety."
+            echo "No backup found in S3 — halting ETL for safety."
             exit 1
           fi
-          echo "✓ Backup found: $LATEST"
+          echo "Backup found: $LATEST"
 
-          # Check backup is less than 30 days old
-          BACKUP_DATE=$(echo "$LATEST" | awk '{print $1}')
-          CUTOFF=$(date -d '30 days ago' +%Y-%m-%d)
-          if [[ "$BACKUP_DATE" < "$CUTOFF" ]]; then
-            echo "❌ Latest backup ($BACKUP_DATE) is older than 30 days — halting ETL."
-            exit 1
+      - name: Build update_job arguments
+        id: build-args
+        run: |
+          ARGS=""
+          if [ "${{ inputs.dry_run || 'false' }}" = "true" ]; then
+            ARGS="$ARGS --dry-run"
           fi
-          echo "✓ Backup is recent: $BACKUP_DATE"
+          if [ "${{ inputs.sample_size || '0' }}" != "0" ]; then
+            ARGS="$ARGS --sample ${{ inputs.sample_size }}"
+          fi
+          if [ "${{ inputs.skip_discover || 'false' }}" = "true" ]; then
+            ARGS="$ARGS --skip-discover"
+          fi
+          if [ "${{ inputs.skip_info || 'false' }}" = "true" ]; then
+            ARGS="$ARGS --skip-info"
+          fi
+          if [ "${{ inputs.skip_cast_crew || 'false' }}" = "true" ]; then
+            ARGS="$ARGS --skip-cast-crew"
+          fi
+          echo "args=$ARGS" >> "$GITHUB_OUTPUT"
+          echo "Running with args: $ARGS"
 
       - name: Run ETL update
         env:
@@ -95,40 +121,17 @@ jobs:
           S3_BUCKET_NAME: ${{ secrets.S3_BUCKET_NAME }}
         run: |
           set -euo pipefail
-          DRY="${{ github.event.inputs.dry_run || 'false' }}"
-          SAMPLE="${{ github.event.inputs.sample || '0' }}"
-          if [ "$DRY" = "true" ]; then
-            echo "Running dry-run (sample=$SAMPLE)"
-            if [ "$SAMPLE" != "0" ]; then
-              python update_job.py --dry-run --sample="$SAMPLE"
-            else
-              python update_job.py --dry-run
-            fi
-          else
-            echo "Running live update (sample=$SAMPLE)"
-            if [ "$SAMPLE" != "0" ]; then
-              python update_job.py --sample="$SAMPLE"
-            else
-              python update_job.py
-            fi
-          fi
+          python update_job.py ${{ steps.build-args.outputs.args }}
 
-      - name: Upload diagnostic artifacts
+      - name: Upload ETL logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: etl-diagnostics
+          name: etl-logs
           path: |
-            *_diagnostics_*.log
-            /tmp/snapshot_*.csv
-          retention-days: 7
-          if-no-files-found: warn
-
-      - name: Upload preview artifacts (dry-run only)
-        if: ${{ github.event.inputs.dry_run == 'true' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: tmdb-previews
-          path: /tmp/update_job_*_preview_*.csv
+            update_job_*.log
+            *_skipped_ids.log
+            *_null_columns.log
+            *.pkl
           retention-days: 7
           if-no-files-found: warn

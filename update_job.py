@@ -1,5 +1,6 @@
 import tmdbsimple as tmdb
 import os
+import sys
 import time
 import duckdb
 import pandas as pd
@@ -8,10 +9,23 @@ import math
 import pickle
 import gzip
 import json
+import argparse
 import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from requests.exceptions import HTTPError
+
+# --- Argument Parsing ---
+parser = argparse.ArgumentParser(description='TMDB ETL Update Job')
+parser.add_argument('--dry-run', action='store_true', help='Run without writing to database')
+parser.add_argument('--sample', type=int, default=0, help='Process only N items per step (0 = all)')
+parser.add_argument('--skip-discover', action='store_true', help='Skip ID discovery from TMDB exports')
+parser.add_argument('--skip-info', action='store_true', help='Skip info update for movies/TV shows')
+parser.add_argument('--skip-cast-crew', action='store_true', help='Skip cast/crew update')
+args = parser.parse_args()
+
+DRY_RUN = args.dry_run
+SAMPLE_SIZE = args.sample
 
 # --- Configuration ---
 API_KEY = os.getenv('TMDBAPIKEY')
@@ -49,19 +63,19 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 def log_and_print(message, level='info'):
-    """Log to file and print message to console."""
     getattr(logger, level)(message)
 
 
 def handle_rate_limit(attempt):
-    """Handle rate limiting with exponential backoff."""
     wait_time = RATE_LIMIT_RETRY_DELAY * (2 ** attempt)
     log_and_print(f"Rate limited. Waiting {wait_time}s before retry...", level='warning')
     time.sleep(wait_time)
 
 
 def save_checkpoint(processed_ids, filename):
-    """Save processed IDs to a checkpoint file."""
+    if DRY_RUN:
+        log_and_print(f"[DRY RUN] Would save checkpoint to {filename}")
+        return
     try:
         with open(filename, 'wb') as f:
             pickle.dump(processed_ids, f)
@@ -70,7 +84,6 @@ def save_checkpoint(processed_ids, filename):
 
 
 def load_checkpoint(filename):
-    """Load processed IDs from a checkpoint file."""
     try:
         with open(filename, 'rb') as f:
             return pickle.load(f)
@@ -82,7 +95,6 @@ def load_checkpoint(filename):
 
 
 def log_null_columns(df, log_file):
-    """Log columns with null values."""
     if df.empty:
         return
     null_counts = df.isnull().sum()
@@ -97,7 +109,6 @@ def log_null_columns(df, log_file):
 
 
 def log_skipped_ids(skipped_ids, filename):
-    """Write skipped IDs to a log file."""
     if not skipped_ids:
         return
     try:
@@ -110,7 +121,6 @@ def log_skipped_ids(skipped_ids, filename):
 
 
 def safe_str(value):
-    """Safely convert value to string, handling lists/dicts."""
     if value is None:
         return None
     if isinstance(value, (list, dict)):
@@ -118,32 +128,36 @@ def safe_str(value):
     return str(value) if value else None
 
 
+def apply_sample(ids_list):
+    """Apply sample limit if set."""
+    if SAMPLE_SIZE > 0 and len(ids_list) > SAMPLE_SIZE:
+        log_and_print(f"[SAMPLE] Limiting from {len(ids_list)} to {SAMPLE_SIZE} items")
+        return ids_list[:SAMPLE_SIZE]
+    return ids_list
+
+
 # =============================================================================
 # ID DISCOVERY FUNCTIONS (TMDB EXPORTS)
 # =============================================================================
 
 def download_tmdb_export(export_type):
-    """
-    Download the daily TMDB export file.
-    export_type: 'movie_ids' or 'tv_series_ids'
-    """
     base_url = "http://files.tmdb.org/p/exports"
-    
+
     dates_to_try = [
         datetime.utcnow(),
         datetime.utcnow() - timedelta(days=1),
         datetime.utcnow() - timedelta(days=2),
     ]
-    
+
     for date in dates_to_try:
         filename = f"{export_type}_{date.strftime('%m_%d_%Y')}.json.gz"
         url = f"{base_url}/{filename}"
-        
+
         log_and_print(f"Trying to download: {url}")
-        
+
         try:
             response = requests.get(url, timeout=120)
-            
+
             if response.status_code == 200:
                 log_and_print(f"Successfully downloaded: {filename} ({len(response.content) / 1024 / 1024:.2f} MB)")
                 return response.content
@@ -153,29 +167,28 @@ def download_tmdb_export(export_type):
             else:
                 log_and_print(f"HTTP {response.status_code} for {filename}", level='warning')
                 continue
-                
+
         except requests.exceptions.Timeout:
             log_and_print(f"Timeout downloading {filename}", level='warning')
             continue
         except requests.exceptions.RequestException as e:
             log_and_print(f"Error downloading {filename}: {e}", level='error')
             continue
-    
+
     raise Exception(f"Could not download TMDB {export_type} export")
 
 
 def parse_ids_export(gzipped_content):
-    """Parse the gzipped JSONL export file."""
     all_ids = set()
-    
+
     try:
         decompressed = gzip.decompress(gzipped_content)
     except gzip.BadGzipFile as e:
         log_and_print(f"Error decompressing file: {e}", level='error')
         raise
-    
+
     lines = decompressed.decode('utf-8').strip().split('\n')
-    
+
     for line in lines:
         if not line.strip():
             continue
@@ -186,12 +199,11 @@ def parse_ids_export(gzipped_content):
                 all_ids.add(int(item_id))
         except json.JSONDecodeError:
             continue
-    
+
     return all_ids
 
 
 def ensure_movies_table(con):
-    """Ensure movies table exists with correct schema."""
     con.execute("""
         CREATE TABLE IF NOT EXISTS movies (
             id BIGINT PRIMARY KEY,
@@ -227,7 +239,6 @@ def ensure_movies_table(con):
 
 
 def ensure_tv_shows_table(con):
-    """Ensure tv_shows table exists with correct schema."""
     con.execute("""
         CREATE TABLE IF NOT EXISTS tv_shows (
             id BIGINT PRIMARY KEY,
@@ -263,7 +274,6 @@ def ensure_tv_shows_table(con):
 
 
 def ensure_cast_crew_tables(con):
-    """Ensure cast/crew tables exist."""
     con.execute("""
         CREATE TABLE IF NOT EXISTS tv_show_cast_crew (
             tv_id BIGINT,
@@ -285,7 +295,7 @@ def ensure_cast_crew_tables(con):
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     """)
-    
+
     con.execute("""
         CREATE TABLE IF NOT EXISTS movie_cast (
             movie_id BIGINT,
@@ -304,7 +314,7 @@ def ensure_cast_crew_tables(con):
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     """)
-    
+
     con.execute("""
         CREATE TABLE IF NOT EXISTS movie_crew (
             movie_id BIGINT,
@@ -326,40 +336,44 @@ def ensure_cast_crew_tables(con):
 
 
 def discover_new_movie_ids(con):
-    """Discover and add new movie IDs from TMDB export."""
     log_and_print("=" * 60)
     log_and_print("DISCOVERING NEW MOVIE IDS")
     log_and_print("=" * 60)
-    
+
     start_time = time.time()
-    
+
     try:
-        ensure_movies_table(con)
-        
-        # Get existing IDs
+        if not DRY_RUN:
+            ensure_movies_table(con)
+
         log_and_print("Fetching existing movie IDs from database...")
-        result = con.execute("SELECT id FROM movies").fetchdf()
-        existing_ids = set(result['id'].tolist()) if not result.empty else set()
+        try:
+            result = con.execute("SELECT id FROM movies").fetchdf()
+            existing_ids = set(result['id'].tolist()) if not result.empty else set()
+        except Exception:
+            log_and_print("movies table not found, treating as empty", level='warning')
+            existing_ids = set()
         log_and_print(f"Found {len(existing_ids)} existing movie IDs")
-        
-        # Download and parse export
+
         log_and_print("Downloading TMDB movie IDs export...")
         export_content = download_tmdb_export('movie_ids')
         all_tmdb_ids = parse_ids_export(export_content)
         log_and_print(f"Total movie IDs in TMDB: {len(all_tmdb_ids)}")
-        
-        # Calculate difference
+
         new_ids = all_tmdb_ids - existing_ids
         log_and_print(f"New movie IDs to add: {len(new_ids)}")
-        
+
         if not new_ids:
             log_and_print("No new movie IDs to add.")
             return
-        
-        # Insert new IDs in batches
-        new_ids_list = list(new_ids)
+
+        new_ids_list = apply_sample(list(new_ids))
+
+        if DRY_RUN:
+            log_and_print(f"[DRY RUN] Would insert {len(new_ids_list)} new movie IDs")
+            return
+
         inserted_count = 0
-        
         for i in range(0, len(new_ids_list), DB_INSERT_BATCH_SIZE):
             batch = new_ids_list[i:i + DB_INSERT_BATCH_SIZE]
             values_str = ', '.join([f"({mid})" for mid in batch])
@@ -368,52 +382,58 @@ def discover_new_movie_ids(con):
                 inserted_count += len(batch)
             except Exception as e:
                 log_and_print(f"Error inserting movie batch: {e}", level='error')
-            
+
             progress = min(i + DB_INSERT_BATCH_SIZE, len(new_ids_list))
             log_and_print(f"Movie ID Progress: {progress}/{len(new_ids_list)}")
-        
+
         elapsed = time.time() - start_time
         log_and_print(f"Inserted {inserted_count} new movie IDs in {elapsed:.2f}s")
-        
+
     except Exception as e:
         log_and_print(f"Error discovering movie IDs: {e}", level='error')
+        import traceback
+        log_and_print(traceback.format_exc(), level='error')
 
 
 def discover_new_tv_show_ids(con):
-    """Discover and add new TV show IDs from TMDB export."""
     log_and_print("=" * 60)
     log_and_print("DISCOVERING NEW TV SHOW IDS")
     log_and_print("=" * 60)
-    
+
     start_time = time.time()
-    
+
     try:
-        ensure_tv_shows_table(con)
-        
-        # Get existing IDs
+        if not DRY_RUN:
+            ensure_tv_shows_table(con)
+
         log_and_print("Fetching existing TV show IDs from database...")
-        result = con.execute("SELECT id FROM tv_shows").fetchdf()
-        existing_ids = set(result['id'].tolist()) if not result.empty else set()
+        try:
+            result = con.execute("SELECT id FROM tv_shows").fetchdf()
+            existing_ids = set(result['id'].tolist()) if not result.empty else set()
+        except Exception:
+            log_and_print("tv_shows table not found, treating as empty", level='warning')
+            existing_ids = set()
         log_and_print(f"Found {len(existing_ids)} existing TV show IDs")
-        
-        # Download and parse export
+
         log_and_print("Downloading TMDB TV series IDs export...")
         export_content = download_tmdb_export('tv_series_ids')
         all_tmdb_ids = parse_ids_export(export_content)
         log_and_print(f"Total TV show IDs in TMDB: {len(all_tmdb_ids)}")
-        
-        # Calculate difference
+
         new_ids = all_tmdb_ids - existing_ids
         log_and_print(f"New TV show IDs to add: {len(new_ids)}")
-        
+
         if not new_ids:
             log_and_print("No new TV show IDs to add.")
             return
-        
-        # Insert new IDs in batches
-        new_ids_list = list(new_ids)
+
+        new_ids_list = apply_sample(list(new_ids))
+
+        if DRY_RUN:
+            log_and_print(f"[DRY RUN] Would insert {len(new_ids_list)} new TV show IDs")
+            return
+
         inserted_count = 0
-        
         for i in range(0, len(new_ids_list), DB_INSERT_BATCH_SIZE):
             batch = new_ids_list[i:i + DB_INSERT_BATCH_SIZE]
             values_str = ', '.join([f"({tid})" for tid in batch])
@@ -422,15 +442,17 @@ def discover_new_tv_show_ids(con):
                 inserted_count += len(batch)
             except Exception as e:
                 log_and_print(f"Error inserting TV show batch: {e}", level='error')
-            
+
             progress = min(i + DB_INSERT_BATCH_SIZE, len(new_ids_list))
             log_and_print(f"TV Show ID Progress: {progress}/{len(new_ids_list)}")
-        
+
         elapsed = time.time() - start_time
         log_and_print(f"Inserted {inserted_count} new TV show IDs in {elapsed:.2f}s")
-        
+
     except Exception as e:
         log_and_print(f"Error discovering TV show IDs: {e}", level='error')
+        import traceback
+        log_and_print(traceback.format_exc(), level='error')
 
 
 # =============================================================================
@@ -438,23 +460,39 @@ def discover_new_tv_show_ids(con):
 # =============================================================================
 
 def fetch_tv_show_info(tv_id):
-    """Fetch TV show info from TMDB API."""
     for attempt in range(MAX_RETRIES):
         try:
             tv_info = tmdb.TV(tv_id).info()
-            
-            # Convert complex fields to strings
-            tv_info['genres'] = safe_str(tv_info.get('genres'))
-            tv_info['networks'] = safe_str(tv_info.get('networks'))
-            tv_info['created_by'] = safe_str(tv_info.get('created_by'))
-            tv_info['production_countries'] = safe_str(tv_info.get('production_countries'))
-            tv_info['production_companies'] = safe_str(tv_info.get('production_companies'))
-            tv_info['spoken_languages'] = safe_str(tv_info.get('spoken_languages'))
-            tv_info['origin_country'] = safe_str(tv_info.get('origin_country'))
-            tv_info['episode_run_time'] = safe_str(tv_info.get('episode_run_time'))
-            
-            return tv_info
-            
+
+            return {
+                'id': tv_info.get('id'),
+                'name': tv_info.get('name'),
+                'overview': tv_info.get('overview'),
+                'poster_path': tv_info.get('poster_path'),
+                'backdrop_path': tv_info.get('backdrop_path'),
+                'popularity': tv_info.get('popularity'),
+                'vote_average': tv_info.get('vote_average'),
+                'vote_count': tv_info.get('vote_count'),
+                'first_air_date': tv_info.get('first_air_date') or None,
+                'last_air_date': tv_info.get('last_air_date') or None,
+                'episode_run_time': safe_str(tv_info.get('episode_run_time')),
+                'homepage': tv_info.get('homepage'),
+                'in_production': tv_info.get('in_production'),
+                'number_of_episodes': tv_info.get('number_of_episodes'),
+                'number_of_seasons': tv_info.get('number_of_seasons'),
+                'origin_country': safe_str(tv_info.get('origin_country')),
+                'original_language': tv_info.get('original_language'),
+                'original_name': tv_info.get('original_name'),
+                'production_countries': safe_str(tv_info.get('production_countries')),
+                'genres': safe_str(tv_info.get('genres')),
+                'networks': safe_str(tv_info.get('networks')),
+                'created_by': safe_str(tv_info.get('created_by')),
+                'status': tv_info.get('status'),
+                'type': tv_info.get('type'),
+                'tagline': tv_info.get('tagline'),
+                'adult': tv_info.get('adult'),
+            }
+
         except HTTPError as e:
             if e.response.status_code == 404:
                 return None
@@ -466,47 +504,50 @@ def fetch_tv_show_info(tv_id):
         except Exception as e:
             log_and_print(f"Error fetching TV show ID {tv_id}: {e}", level='error')
             return None
-    
+
     return None
 
 
 def update_tv_shows_info(con):
-    """Update TV shows info data."""
     log_and_print("=" * 60)
     log_and_print("STARTING TV SHOWS INFO UPDATE")
     log_and_print("=" * 60)
-    
+
     start_time = time.time()
     all_tv_data = []
     processed_count = 0
     skipped_ids = []
-    
+
     processed_ids = load_checkpoint('tv_shows_info_checkpoint.pkl')
-    
-    # Get TV shows that need info update
+
     tv_ids_df = con.execute('''
         SELECT id FROM tv_shows WHERE name IS NULL OR name = ''
     ''').fetchdf()
-    
+
     if tv_ids_df.empty:
         log_and_print("No TV shows need info updating.")
         return
-    
+
     tv_ids_to_process = [tid for tid in tv_ids_df['id'].tolist() if tid not in processed_ids]
+    tv_ids_to_process = apply_sample(tv_ids_to_process)
     total_to_process = len(tv_ids_to_process)
-    
+
     if total_to_process == 0:
         log_and_print("All TV shows already processed (from checkpoint).")
         return
-    
+
     log_and_print(f"Starting TV show info retrieval for {total_to_process} shows...")
-    
+
+    if DRY_RUN:
+        log_and_print(f"[DRY RUN] Would fetch info for {total_to_process} TV shows")
+        return
+
     with ThreadPoolExecutor(max_workers=MAX_API_WORKERS) as executor:
         future_to_tv_id = {
             executor.submit(fetch_tv_show_info, tv_id): tv_id
             for tv_id in tv_ids_to_process
         }
-        
+
         for future in as_completed(future_to_tv_id):
             tv_id = future_to_tv_id[future]
             try:
@@ -515,39 +556,53 @@ def update_tv_shows_info(con):
                     all_tv_data.append(tv_data)
                 else:
                     skipped_ids.append(tv_id)
-                
+
                 processed_ids.add(tv_id)
                 processed_count += 1
-                
+
                 if processed_count % API_BATCH_SIZE == 0:
                     percent = (processed_count / total_to_process) * 100
                     log_and_print(f"TV Show Info Progress: {processed_count}/{total_to_process} ({percent:.2f}%)")
                     save_checkpoint(processed_ids, 'tv_shows_info_checkpoint.pkl')
-                
+
             except Exception as e:
                 log_and_print(f"Error processing TV show ID {tv_id}: {e}", level='error')
                 skipped_ids.append(tv_id)
-    
+
     elapsed = time.time() - start_time
     log_and_print(f"TV show info API retrieval complete in {elapsed:.2f}s")
     log_and_print(f"Successfully fetched: {len(all_tv_data)}, Skipped: {len(skipped_ids)}")
-    
+
     if not all_tv_data:
         log_and_print("No TV show data to update.")
         log_skipped_ids(skipped_ids, 'tv_shows_info_skipped_ids.log')
         return
-    
+
     tv_df = pd.DataFrame(all_tv_data)
+
+    # Filter to only known table columns
+    TV_SHOW_COLUMNS = ['id', 'name', 'overview', 'poster_path', 'backdrop_path', 'popularity',
+        'vote_average', 'vote_count', 'first_air_date', 'last_air_date', 'episode_run_time',
+        'homepage', 'in_production', 'number_of_episodes', 'number_of_seasons', 'origin_country',
+        'original_language', 'original_name', 'production_countries', 'genres', 'networks',
+        'created_by', 'status', 'type', 'tagline', 'adult']
+    tv_df = tv_df[[c for c in TV_SHOW_COLUMNS if c in tv_df.columns]]
+
+    # Sanitize empty date strings to None (DuckDB cannot cast '' to DATE)
+    for date_col in ['first_air_date', 'last_air_date']:
+        if date_col in tv_df.columns:
+            tv_df[date_col] = tv_df[date_col].replace('', None)
+
     log_null_columns(tv_df, log_file='tv_shows_info_null_columns.log')
-    
+
     log_and_print("Updating TV shows in database...")
-    
+
     num_batches = math.ceil(len(tv_df) / DB_INSERT_BATCH_SIZE)
     for i in range(num_batches):
         start_idx = i * DB_INSERT_BATCH_SIZE
         end_idx = min((i + 1) * DB_INSERT_BATCH_SIZE, len(tv_df))
         batch_df = tv_df.iloc[start_idx:end_idx]
-        
+
         try:
             con.register('batch_view', batch_df)
             con.execute('''
@@ -577,17 +632,18 @@ def update_tv_shows_info(con):
                     status = batch_view.status,
                     type = batch_view.type,
                     tagline = batch_view.tagline,
-                    adult = batch_view.adult
+                    adult = batch_view.adult,
+                    updated_at = CURRENT_TIMESTAMP
                 FROM batch_view
                 WHERE tv_shows.id = batch_view.id
             ''')
             log_and_print(f"TV Show Info Batch {i+1}/{num_batches} updated ({len(batch_df)} rows)")
         except Exception as e:
             log_and_print(f"Error updating TV show batch: {e}", level='error')
-    
+
     save_checkpoint(processed_ids, 'tv_shows_info_checkpoint.pkl')
     log_skipped_ids(skipped_ids, 'tv_shows_info_skipped_ids.log')
-    
+
     total_elapsed = time.time() - start_time
     log_and_print(f'TV shows info update complete in {total_elapsed:.2f}s')
 
@@ -597,11 +653,10 @@ def update_tv_shows_info(con):
 # =============================================================================
 
 def fetch_tv_show_credits(tv_id):
-    """Fetches credits for the most recent season of a TV show."""
     for attempt in range(MAX_RETRIES):
         try:
             tv = tmdb.TV(tv_id)
-            
+
             try:
                 tv_info = tv.info()
             except HTTPError as e:
@@ -611,24 +666,24 @@ def fetch_tv_show_credits(tv_id):
                     handle_rate_limit(attempt)
                     continue
                 raise
-            
+
             seasons = tv_info.get('seasons', [])
             if not seasons:
                 return []
-            
+
             seasons_sorted = sorted(
                 [s for s in seasons if s.get('season_number') is not None],
                 key=lambda s: (s.get('air_date') or '', s['season_number']),
                 reverse=True
             )
-            
+
             if not seasons_sorted:
                 return []
-            
+
             recent_season = seasons_sorted[0]
             season_number = recent_season['season_number']
             season = tmdb.TV_Seasons(tv_id, season_number)
-            
+
             try:
                 credits = season.credits()
             except HTTPError as e:
@@ -638,37 +693,37 @@ def fetch_tv_show_credits(tv_id):
                     handle_rate_limit(attempt)
                     continue
                 raise
-            
+
             cast_list = credits.get('cast', [])
             processed_cast_data = []
-            
-            for cast_member in cast_list:
+
+            for cast_member in cast_list:  # No limit for cast
                 roles = cast_member.get('roles')
-                
+
                 character = cast_member.get('character')
                 if not character and roles and isinstance(roles, list) and len(roles) > 0:
                     character = roles[0].get('character')
-                
+
                 cast_order = cast_member.get('order')
                 if cast_order is None:
                     cast_order = cast_member.get('cast_order')
-                
+
                 credit_id = cast_member.get('credit_id')
                 if not credit_id and roles and isinstance(roles, list) and len(roles) > 0:
                     credit_id = roles[0].get('credit_id')
-                
+
                 cast_id = cast_member.get('cast_id')
                 if cast_id is None:
                     cast_id = cast_member.get('id')
-                
+
                 also_known_as = cast_member.get('also_known_as')
                 if also_known_as and isinstance(also_known_as, list):
                     also_known_as = str(also_known_as)
-                
+
                 total_episode_count = cast_member.get('total_episode_count')
                 if total_episode_count is None and roles and isinstance(roles, list):
                     total_episode_count = sum(r.get('episode_count', 0) for r in roles)
-                
+
                 processed_cast_data.append({
                     'tv_id': tv_id,
                     'person_id': cast_member.get('id'),
@@ -687,7 +742,7 @@ def fetch_tv_show_credits(tv_id):
                     'also_known_as': also_known_as
                 })
             return processed_cast_data
-            
+
         except HTTPError as e:
             if e.response.status_code == 429:
                 handle_rate_limit(attempt)
@@ -697,70 +752,75 @@ def fetch_tv_show_credits(tv_id):
         except Exception as e:
             log_and_print(f"Error fetching credits for tv_id {tv_id}: {e}", level='error')
             return []
-    
+
     return []
 
 
-def check_and_remove_tv_duplicates(con):
-    """Check for and remove duplicate TV cast/crew rows."""
-    log_and_print("Checking for TV cast/crew duplicates...")
-    
+def check_and_remove_duplicates(con, table, partition_cols, select_cols):
+    """Generic deduplication for any table."""
+    log_and_print(f"Checking for duplicates in {table}...")
+
+    partition_str = ', '.join(partition_cols)
+
     try:
-        dup_count_result = con.execute("""
+        dup_count = con.execute(f"""
             SELECT COUNT(*) FROM (
-                SELECT tv_id, person_id, credit_id
-                FROM tv_show_cast_crew
-                GROUP BY tv_id, person_id, credit_id
+                SELECT {partition_str}
+                FROM {table}
+                GROUP BY {partition_str}
                 HAVING COUNT(*) > 1
             )
         """).fetchone()[0]
     except Exception:
-        log_and_print("tv_show_cast_crew table doesn't exist or is empty")
+        log_and_print(f"{table} table doesn't exist or is empty")
         return
-    
-    if dup_count_result == 0:
-        log_and_print("No TV cast/crew duplicates found.")
+
+    if dup_count == 0:
+        log_and_print(f"No duplicates found in {table}.")
         return
-    
-    log_and_print(f"Found {dup_count_result} TV duplicate groups. Removing...")
-    
-    con.execute("""
-        CREATE OR REPLACE TEMP TABLE tv_dedup_keep AS
+
+    log_and_print(f"Found {dup_count} duplicate groups in {table}. Removing...")
+
+    if DRY_RUN:
+        log_and_print(f"[DRY RUN] Would remove duplicates from {table}")
+        return
+
+    select_cols_str = ', '.join(select_cols)
+
+    con.execute(f"""
+        CREATE OR REPLACE TEMP TABLE {table}_dedup AS
         SELECT * FROM (
             SELECT *,
                 ROW_NUMBER() OVER (
-                    PARTITION BY tv_id, person_id, credit_id
+                    PARTITION BY {partition_str}
                     ORDER BY inserted_at DESC
                 ) AS rn
-            FROM tv_show_cast_crew
+            FROM {table}
         )
         WHERE rn = 1
     """)
-    
-    before_count = con.execute("SELECT COUNT(*) FROM tv_show_cast_crew").fetchone()[0]
-    
-    con.execute("DELETE FROM tv_show_cast_crew")
-    con.execute("""
-        INSERT INTO tv_show_cast_crew
-        SELECT tv_id, person_id, name, credit_id, character, cast_order, gender,
-               profile_path, known_for_department, popularity, original_name, roles,
-               total_episode_count, cast_id, also_known_as, inserted_at, updated_at
-        FROM tv_dedup_keep
+
+    before_count = con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+
+    con.execute(f"DELETE FROM {table}")
+    con.execute(f"""
+        INSERT INTO {table}
+        SELECT {select_cols_str}
+        FROM {table}_dedup
     """)
-    
-    after_count = con.execute("SELECT COUNT(*) FROM tv_show_cast_crew").fetchone()[0]
+
+    after_count = con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
     deleted = before_count - after_count
-    
-    con.execute("DROP TABLE IF EXISTS tv_dedup_keep")
-    log_and_print(f"TV deduplication complete. Removed {deleted} duplicate rows.")
+
+    con.execute(f"DROP TABLE IF EXISTS {table}_dedup")
+    log_and_print(f"{table} deduplication complete. Removed {deleted} rows.")
 
 
 def update_tv_show_cast_crew(con):
-    """Update TV show cast/crew data."""
     log_and_print("=" * 60)
     log_and_print("STARTING TV SHOW CAST/CREW UPDATE")
     log_and_print("=" * 60)
-    
+
     start_time = time.time()
     all_cast_data_flat = []
     processed_tv_count = 0
@@ -769,21 +829,30 @@ def update_tv_show_cast_crew(con):
     processed_ids = load_checkpoint('tv_cast_crew_checkpoint.pkl')
 
     log_and_print('Fetching TV show IDs from MotherDuck...')
-    
+
     try:
         tv_ids_df = con.execute(
             '''SELECT id FROM tv_shows WHERE id NOT IN (SELECT DISTINCT tv_id FROM tv_show_cast_crew)'''
         ).fetchdf()
     except Exception:
         tv_ids_df = con.execute('SELECT id FROM tv_shows').fetchdf()
-    
+
     tv_ids_to_process = [tid for tid in tv_ids_df['id'].tolist() if tid not in processed_ids]
+    tv_ids_to_process = apply_sample(tv_ids_to_process)
     total_tv_to_process = len(tv_ids_to_process)
     log_and_print(f"Found {total_tv_to_process} TV show IDs to process.")
 
     if total_tv_to_process == 0:
         log_and_print("No new TV shows to process.")
-        check_and_remove_tv_duplicates(con)
+        check_and_remove_duplicates(
+            con, 'tv_show_cast_crew',
+            ['tv_id', 'person_id', 'credit_id'],
+            ['tv_id', 'person_id', 'name', 'credit_id', 'character', 'cast_order', 'gender', 'profile_path', 'known_for_department', 'popularity', 'original_name', 'roles', 'total_episode_count', 'cast_id', 'also_known_as', 'inserted_at', 'updated_at']
+        )
+        return
+
+    if DRY_RUN:
+        log_and_print(f"[DRY RUN] Would fetch cast/crew for {total_tv_to_process} TV shows")
         return
 
     log_and_print(f'Starting parallel API retrieval with {MAX_API_WORKERS} workers...')
@@ -817,7 +886,11 @@ def update_tv_show_cast_crew(con):
 
     if not all_cast_data_flat:
         log_and_print("No TV cast/crew data to insert.")
-        check_and_remove_tv_duplicates(con)
+        check_and_remove_duplicates(
+            con, 'tv_show_cast_crew',
+            ['tv_id', 'person_id', 'credit_id'],
+            ['tv_id', 'person_id', 'name', 'credit_id', 'character', 'cast_order', 'gender', 'profile_path', 'known_for_department', 'popularity', 'original_name', 'roles', 'total_episode_count', 'cast_id', 'also_known_as', 'inserted_at', 'updated_at']
+        )
         log_skipped_ids(skipped_ids, 'tv_cast_crew_skipped_ids.log')
         return
 
@@ -826,7 +899,7 @@ def update_tv_show_cast_crew(con):
 
     log_and_print('Inserting TV data into MotherDuck...')
     tv_columns = 'tv_id, person_id, name, credit_id, character, cast_order, gender, profile_path, known_for_department, popularity, original_name, roles, total_episode_count, cast_id, also_known_as'
-    
+
     num_batches = math.ceil(len(cast_df) / DB_INSERT_BATCH_SIZE)
     for i in range(num_batches):
         start_idx = i * DB_INSERT_BATCH_SIZE
@@ -840,9 +913,13 @@ def update_tv_show_cast_crew(con):
             log_and_print(f"Error inserting TV batch: {e}", level='error')
 
     save_checkpoint(processed_ids, 'tv_cast_crew_checkpoint.pkl')
-    check_and_remove_tv_duplicates(con)
+    check_and_remove_duplicates(
+        con, 'tv_show_cast_crew',
+        ['tv_id', 'person_id', 'credit_id'],
+        ['tv_id', 'person_id', 'name', 'credit_id', 'character', 'cast_order', 'gender', 'profile_path', 'known_for_department', 'popularity', 'original_name', 'roles', 'total_episode_count', 'cast_id', 'also_known_as', 'inserted_at', 'updated_at']
+    )
     log_skipped_ids(skipped_ids, 'tv_cast_crew_skipped_ids.log')
-    
+
     total_elapsed = time.time() - start_time
     log_and_print(f'TV show cast/crew update complete in {total_elapsed:.2f}s')
 
@@ -852,7 +929,6 @@ def update_tv_show_cast_crew(con):
 # =============================================================================
 
 def fetch_movie_cast(movie_id):
-    """Fetches cast for a single movie ID."""
     for attempt in range(MAX_RETRIES):
         try:
             try:
@@ -864,11 +940,11 @@ def fetch_movie_cast(movie_id):
                     handle_rate_limit(attempt)
                     continue
                 raise
-            
+
             cast_list = credits_dict.get("cast", [])
             processed_cast_data = []
-            
-            for cast_member_dict in cast_list:
+
+            for cast_member_dict in cast_list:  # No limit for cast
                 processed_cast_data.append({
                     'movie_id': movie_id,
                     'person_id': cast_member_dict.get('id'),
@@ -884,7 +960,7 @@ def fetch_movie_cast(movie_id):
                     'cast_id': cast_member_dict.get('cast_id'),
                 })
             return processed_cast_data
-            
+
         except HTTPError as e:
             if e.response.status_code == 429:
                 handle_rate_limit(attempt)
@@ -894,70 +970,15 @@ def fetch_movie_cast(movie_id):
         except Exception as e:
             log_and_print(f"Error fetching cast for movie ID {movie_id}: {e}", level='error')
             return []
-    
+
     return []
 
 
-def check_and_remove_movie_cast_duplicates(con):
-    """Check for and remove duplicate movie cast rows."""
-    log_and_print("Checking for movie cast duplicates...")
-    
-    try:
-        dup_count = con.execute("""
-            SELECT COUNT(*) FROM (
-                SELECT movie_id, person_id, credit_id
-                FROM movie_cast
-                GROUP BY movie_id, person_id, credit_id
-                HAVING COUNT(*) > 1
-            )
-        """).fetchone()[0]
-    except Exception:
-        log_and_print("movie_cast table doesn't exist or is empty")
-        return
-    
-    if dup_count == 0:
-        log_and_print("No movie cast duplicates found.")
-        return
-    
-    log_and_print(f"Found {dup_count} movie cast duplicate groups. Removing...")
-    
-    con.execute("""
-        CREATE OR REPLACE TEMP TABLE movie_cast_dedup AS
-        SELECT * FROM (
-            SELECT *,
-                ROW_NUMBER() OVER (
-                    PARTITION BY movie_id, person_id, credit_id
-                    ORDER BY inserted_at DESC
-                ) AS rn
-            FROM movie_cast
-        )
-        WHERE rn = 1
-    """)
-    
-    before_count = con.execute("SELECT COUNT(*) FROM movie_cast").fetchone()[0]
-    
-    con.execute("DELETE FROM movie_cast")
-    con.execute("""
-        INSERT INTO movie_cast
-        SELECT movie_id, person_id, name, credit_id, character, cast_order, gender,
-               profile_path, known_for_department, popularity, original_name, cast_id,
-               inserted_at, updated_at
-        FROM movie_cast_dedup
-    """)
-    
-    after_count = con.execute("SELECT COUNT(*) FROM movie_cast").fetchone()[0]
-    deleted = before_count - after_count
-    
-    con.execute("DROP TABLE IF EXISTS movie_cast_dedup")
-    log_and_print(f"Movie cast deduplication complete. Removed {deleted} duplicate rows.")
-
-
 def update_movie_cast(con):
-    """Update movie cast data."""
     log_and_print("=" * 60)
     log_and_print("STARTING MOVIE CAST UPDATE")
     log_and_print("=" * 60)
-    
+
     start_time = time.time()
     all_cast_data_flat = []
     processed_count = 0
@@ -966,21 +987,30 @@ def update_movie_cast(con):
     processed_ids = load_checkpoint('movie_cast_checkpoint.pkl')
 
     log_and_print('Fetching movie IDs from MotherDuck...')
-    
+
     try:
         movies_ids_df = con.execute(
             '''SELECT id FROM movies WHERE id NOT IN (SELECT DISTINCT movie_id FROM movie_cast)'''
         ).fetchdf()
     except Exception:
         movies_ids_df = con.execute('SELECT id FROM movies').fetchdf()
-    
+
     movie_ids_to_process = [mid for mid in movies_ids_df['id'].tolist() if mid not in processed_ids]
+    movie_ids_to_process = apply_sample(movie_ids_to_process)
     total_to_process = len(movie_ids_to_process)
     log_and_print(f"Found {total_to_process} movie IDs to process.")
 
     if total_to_process == 0:
         log_and_print("No new movies to process for cast.")
-        check_and_remove_movie_cast_duplicates(con)
+        check_and_remove_duplicates(
+            con, 'movie_cast',
+            ['movie_id', 'person_id', 'credit_id'],
+            ['movie_id', 'person_id', 'name', 'credit_id', 'character', 'cast_order', 'gender', 'profile_path', 'known_for_department', 'popularity', 'original_name', 'cast_id', 'inserted_at', 'updated_at']
+        )
+        return
+
+    if DRY_RUN:
+        log_and_print(f"[DRY RUN] Would fetch cast for {total_to_process} movies")
         return
 
     log_and_print(f'Starting parallel API retrieval with {MAX_API_WORKERS} workers...')
@@ -999,7 +1029,7 @@ def update_movie_cast(con):
                     all_cast_data_flat.extend(cast_data)
                 else:
                     skipped_ids.append(movie_id)
-                
+
                 processed_ids.add(movie_id)
                 processed_count += 1
 
@@ -1007,7 +1037,7 @@ def update_movie_cast(con):
                     percent = (processed_count / total_to_process) * 100
                     log_and_print(f"Movie Cast Progress: {processed_count}/{total_to_process} ({percent:.2f}%)")
                     save_checkpoint(processed_ids, 'movie_cast_checkpoint.pkl')
-                    
+
             except Exception as e:
                 log_and_print(f"Error processing movie ID {movie_id}: {e}", level='error')
                 skipped_ids.append(movie_id)
@@ -1018,7 +1048,11 @@ def update_movie_cast(con):
 
     if not all_cast_data_flat:
         log_and_print("No movie cast data to insert.")
-        check_and_remove_movie_cast_duplicates(con)
+        check_and_remove_duplicates(
+            con, 'movie_cast',
+            ['movie_id', 'person_id', 'credit_id'],
+            ['movie_id', 'person_id', 'name', 'credit_id', 'character', 'cast_order', 'gender', 'profile_path', 'known_for_department', 'popularity', 'original_name', 'cast_id', 'inserted_at', 'updated_at']
+        )
         log_skipped_ids(skipped_ids, 'movie_cast_skipped_ids.log')
         return
 
@@ -1041,7 +1075,11 @@ def update_movie_cast(con):
             log_and_print(f"Error inserting movie cast batch: {e}", level='error')
 
     save_checkpoint(processed_ids, 'movie_cast_checkpoint.pkl')
-    check_and_remove_movie_cast_duplicates(con)
+    check_and_remove_duplicates(
+        con, 'movie_cast',
+        ['movie_id', 'person_id', 'credit_id'],
+        ['movie_id', 'person_id', 'name', 'credit_id', 'character', 'cast_order', 'gender', 'profile_path', 'known_for_department', 'popularity', 'original_name', 'cast_id', 'inserted_at', 'updated_at']
+    )
     log_skipped_ids(skipped_ids, 'movie_cast_skipped_ids.log')
 
     total_elapsed = time.time() - start_time
@@ -1053,7 +1091,6 @@ def update_movie_cast(con):
 # =============================================================================
 
 def fetch_movie_crew(movie_id):
-    """Fetches crew for a single movie ID."""
     for attempt in range(MAX_RETRIES):
         try:
             try:
@@ -1065,10 +1102,10 @@ def fetch_movie_crew(movie_id):
                     handle_rate_limit(attempt)
                     continue
                 raise
-            
+
             crew_list = credits_dict.get("crew", [])
             processed_crew_data = []
-            
+
             # Limit crew to 50 per movie
             for crew_member_dict in crew_list[:50]:
                 processed_crew_data.append({
@@ -1086,7 +1123,7 @@ def fetch_movie_crew(movie_id):
                     'job': crew_member_dict.get('job')
                 })
             return processed_crew_data
-            
+
         except HTTPError as e:
             if e.response.status_code == 429:
                 handle_rate_limit(attempt)
@@ -1096,70 +1133,15 @@ def fetch_movie_crew(movie_id):
         except Exception as e:
             log_and_print(f"Error fetching crew for movie ID {movie_id}: {e}", level='error')
             return []
-    
+
     return []
 
 
-def check_and_remove_movie_crew_duplicates(con):
-    """Check for and remove duplicate movie crew rows."""
-    log_and_print("Checking for movie crew duplicates...")
-    
-    try:
-        dup_count = con.execute("""
-            SELECT COUNT(*) FROM (
-                SELECT movie_id, person_id, credit_id
-                FROM movie_crew
-                GROUP BY movie_id, person_id, credit_id
-                HAVING COUNT(*) > 1
-            )
-        """).fetchone()[0]
-    except Exception:
-        log_and_print("movie_crew table doesn't exist or is empty")
-        return
-    
-    if dup_count == 0:
-        log_and_print("No movie crew duplicates found.")
-        return
-    
-    log_and_print(f"Found {dup_count} movie crew duplicate groups. Removing...")
-    
-    con.execute("""
-        CREATE OR REPLACE TEMP TABLE movie_crew_dedup AS
-        SELECT * FROM (
-            SELECT *,
-                ROW_NUMBER() OVER (
-                    PARTITION BY movie_id, person_id, credit_id
-                    ORDER BY inserted_at DESC
-                ) AS rn
-            FROM movie_crew
-        )
-        WHERE rn = 1
-    """)
-    
-    before_count = con.execute("SELECT COUNT(*) FROM movie_crew").fetchone()[0]
-    
-    con.execute("DELETE FROM movie_crew")
-    con.execute("""
-        INSERT INTO movie_crew
-        SELECT movie_id, person_id, name, credit_id, gender, profile_path,
-               known_for_department, popularity, original_name, adult,
-               department, job, inserted_at, updated_at
-        FROM movie_crew_dedup
-    """)
-    
-    after_count = con.execute("SELECT COUNT(*) FROM movie_crew").fetchone()[0]
-    deleted = before_count - after_count
-    
-    con.execute("DROP TABLE IF EXISTS movie_crew_dedup")
-    log_and_print(f"Movie crew deduplication complete. Removed {deleted} duplicate rows.")
-
-
 def update_movie_crew(con):
-    """Update movie crew data."""
     log_and_print("=" * 60)
     log_and_print("STARTING MOVIE CREW UPDATE")
     log_and_print("=" * 60)
-    
+
     start_time = time.time()
     all_crew_data_flat = []
     processed_count = 0
@@ -1168,21 +1150,30 @@ def update_movie_crew(con):
     processed_ids = load_checkpoint('movie_crew_checkpoint.pkl')
 
     log_and_print('Fetching movie IDs from MotherDuck...')
-    
+
     try:
         movies_ids_df = con.execute(
             '''SELECT id FROM movies WHERE id NOT IN (SELECT DISTINCT movie_id FROM movie_crew)'''
         ).fetchdf()
     except Exception:
         movies_ids_df = con.execute('SELECT id FROM movies').fetchdf()
-    
+
     movie_ids_to_process = [mid for mid in movies_ids_df['id'].tolist() if mid not in processed_ids]
+    movie_ids_to_process = apply_sample(movie_ids_to_process)
     total_to_process = len(movie_ids_to_process)
     log_and_print(f"Found {total_to_process} movie IDs to process.")
 
     if total_to_process == 0:
         log_and_print("No new movies to process for crew.")
-        check_and_remove_movie_crew_duplicates(con)
+        check_and_remove_duplicates(
+            con, 'movie_crew',
+            ['movie_id', 'person_id', 'credit_id'],
+            ['movie_id', 'person_id', 'name', 'credit_id', 'gender', 'profile_path', 'known_for_department', 'popularity', 'original_name', 'adult', 'department', 'job', 'inserted_at', 'updated_at']
+        )
+        return
+
+    if DRY_RUN:
+        log_and_print(f"[DRY RUN] Would fetch crew for {total_to_process} movies")
         return
 
     log_and_print(f'Starting parallel API retrieval with {MAX_API_WORKERS} workers...')
@@ -1201,7 +1192,7 @@ def update_movie_crew(con):
                     all_crew_data_flat.extend(crew_data)
                 else:
                     skipped_ids.append(movie_id)
-                
+
                 processed_ids.add(movie_id)
                 processed_count += 1
 
@@ -1209,7 +1200,7 @@ def update_movie_crew(con):
                     percent = (processed_count / total_to_process) * 100
                     log_and_print(f"Movie Crew Progress: {processed_count}/{total_to_process} ({percent:.2f}%)")
                     save_checkpoint(processed_ids, 'movie_crew_checkpoint.pkl')
-                    
+
             except Exception as e:
                 log_and_print(f"Error processing movie ID {movie_id}: {e}", level='error')
                 skipped_ids.append(movie_id)
@@ -1220,7 +1211,11 @@ def update_movie_crew(con):
 
     if not all_crew_data_flat:
         log_and_print("No movie crew data to insert.")
-        check_and_remove_movie_crew_duplicates(con)
+        check_and_remove_duplicates(
+            con, 'movie_crew',
+            ['movie_id', 'person_id', 'credit_id'],
+            ['movie_id', 'person_id', 'name', 'credit_id', 'gender', 'profile_path', 'known_for_department', 'popularity', 'original_name', 'adult', 'department', 'job', 'inserted_at', 'updated_at']
+        )
         log_skipped_ids(skipped_ids, 'movie_crew_skipped_ids.log')
         return
 
@@ -1243,7 +1238,11 @@ def update_movie_crew(con):
             log_and_print(f"Error inserting movie crew batch: {e}", level='error')
 
     save_checkpoint(processed_ids, 'movie_crew_checkpoint.pkl')
-    check_and_remove_movie_crew_duplicates(con)
+    check_and_remove_duplicates(
+        con, 'movie_crew',
+        ['movie_id', 'person_id', 'credit_id'],
+        ['movie_id', 'person_id', 'name', 'credit_id', 'gender', 'profile_path', 'known_for_department', 'popularity', 'original_name', 'adult', 'department', 'job', 'inserted_at', 'updated_at']
+    )
     log_skipped_ids(skipped_ids, 'movie_crew_skipped_ids.log')
 
     total_elapsed = time.time() - start_time
@@ -1255,23 +1254,39 @@ def update_movie_crew(con):
 # =============================================================================
 
 def fetch_movie_info(movie_id):
-    """Fetch movie info from TMDB API."""
     for attempt in range(MAX_RETRIES):
         try:
             movie_info = tmdb.Movies(movie_id).info()
-            
-            movie_info['production_countries'] = safe_str(movie_info.get('production_countries'))
-            movie_info['genres'] = safe_str(movie_info.get('genres'))
-            movie_info['production_companies'] = safe_str(movie_info.get('production_companies'))
-            movie_info['spoken_languages'] = safe_str(movie_info.get('spoken_languages'))
-            movie_info['belongs_to_collection'] = safe_str(movie_info.get('belongs_to_collection'))
-            
-            if 'origin_country' in movie_info:
-                origin = movie_info.get('origin_country')
-                movie_info['origin_country'] = origin if isinstance(origin, list) else None
-            
-            return movie_info
-            
+
+            return {
+                'id': movie_info.get('id'),
+                'adult': movie_info.get('adult'),
+                'backdrop_path': movie_info.get('backdrop_path'),
+                'belongs_to_collection': safe_str(movie_info.get('belongs_to_collection')),
+                'budget': movie_info.get('budget'),
+                'genres': safe_str(movie_info.get('genres')),
+                'homepage': movie_info.get('homepage'),
+                'imdb_id': movie_info.get('imdb_id'),
+                'origin_country': movie_info.get('origin_country') if isinstance(movie_info.get('origin_country'), list) else None,
+                'original_language': movie_info.get('original_language'),
+                'original_title': movie_info.get('original_title'),
+                'overview': movie_info.get('overview'),
+                'popularity': movie_info.get('popularity'),
+                'poster_path': movie_info.get('poster_path'),
+                'production_companies': safe_str(movie_info.get('production_companies')),
+                'production_countries': safe_str(movie_info.get('production_countries')),
+                'release_date': movie_info.get('release_date') or None,
+                'revenue': movie_info.get('revenue'),
+                'runtime': movie_info.get('runtime'),
+                'spoken_languages': safe_str(movie_info.get('spoken_languages')),
+                'status': movie_info.get('status'),
+                'tagline': movie_info.get('tagline'),
+                'title': movie_info.get('title'),
+                'video': movie_info.get('video'),
+                'vote_average': movie_info.get('vote_average'),
+                'vote_count': movie_info.get('vote_count'),
+            }
+
         except HTTPError as e:
             if e.response.status_code == 404:
                 return None
@@ -1283,46 +1298,50 @@ def fetch_movie_info(movie_id):
         except Exception as e:
             log_and_print(f"Error fetching movie ID {movie_id}: {e}", level='error')
             return None
-    
+
     return None
 
 
 def update_movies_info(con):
-    """Update movies info data."""
     log_and_print("=" * 60)
     log_and_print("STARTING MOVIES INFO UPDATE")
     log_and_print("=" * 60)
-    
+
     start_time = time.time()
     all_movie_data = []
     processed_count = 0
     skipped_ids = []
-    
+
     processed_ids = load_checkpoint('movies_info_checkpoint.pkl')
-    
+
     movies_ids_df = con.execute('''
         SELECT id FROM movies WHERE title IS NULL OR title = ''
     ''').fetchdf()
-    
+
     if movies_ids_df.empty:
         log_and_print("No movies need info updating.")
         return
-    
+
     movie_ids_to_process = [mid for mid in movies_ids_df['id'].tolist() if mid not in processed_ids]
+    movie_ids_to_process = apply_sample(movie_ids_to_process)
     total_to_process = len(movie_ids_to_process)
-    
+
     if total_to_process == 0:
         log_and_print("All movies already processed (from checkpoint).")
         return
-    
+
     log_and_print(f"Starting movie info retrieval for {total_to_process} movies...")
-    
+
+    if DRY_RUN:
+        log_and_print(f"[DRY RUN] Would fetch info for {total_to_process} movies")
+        return
+
     with ThreadPoolExecutor(max_workers=MAX_API_WORKERS) as executor:
         future_to_movie_id = {
             executor.submit(fetch_movie_info, movie_id): movie_id
             for movie_id in movie_ids_to_process
         }
-        
+
         for future in as_completed(future_to_movie_id):
             movie_id = future_to_movie_id[future]
             try:
@@ -1331,39 +1350,53 @@ def update_movies_info(con):
                     all_movie_data.append(movie_data)
                 else:
                     skipped_ids.append(movie_id)
-                
+
                 processed_ids.add(movie_id)
                 processed_count += 1
-                
+
                 if processed_count % API_BATCH_SIZE == 0:
                     percent = (processed_count / total_to_process) * 100
                     log_and_print(f"Movie Info Progress: {processed_count}/{total_to_process} ({percent:.2f}%)")
                     save_checkpoint(processed_ids, 'movies_info_checkpoint.pkl')
-                
+
             except Exception as e:
                 log_and_print(f"Error processing movie ID {movie_id}: {e}", level='error')
                 skipped_ids.append(movie_id)
-    
+
     elapsed = time.time() - start_time
     log_and_print(f"Movie info API retrieval complete in {elapsed:.2f}s")
     log_and_print(f"Successfully fetched: {len(all_movie_data)}, Skipped: {len(skipped_ids)}")
-    
+
     if not all_movie_data:
         log_and_print("No movie data to update.")
         log_skipped_ids(skipped_ids, 'movies_info_skipped_ids.log')
         return
-    
+
     movies_df = pd.DataFrame(all_movie_data)
+
+    # Filter to only known table columns
+    MOVIE_COLUMNS = ['id', 'adult', 'backdrop_path', 'belongs_to_collection', 'budget', 'genres',
+        'homepage', 'imdb_id', 'origin_country', 'original_language', 'original_title', 'overview',
+        'popularity', 'poster_path', 'production_companies', 'production_countries', 'release_date',
+        'revenue', 'runtime', 'spoken_languages', 'status', 'tagline', 'title', 'video',
+        'vote_average', 'vote_count']
+    movies_df = movies_df[[c for c in MOVIE_COLUMNS if c in movies_df.columns]]
+
+    # Sanitize empty date strings to None (DuckDB cannot cast '' to DATE)
+    for date_col in ['release_date']:
+        if date_col in movies_df.columns:
+            movies_df[date_col] = movies_df[date_col].replace('', None)
+
     log_null_columns(movies_df, log_file='movies_info_null_columns.log')
-    
+
     log_and_print("Updating movies in database...")
-    
+
     num_batches = math.ceil(len(movies_df) / DB_INSERT_BATCH_SIZE)
     for i in range(num_batches):
         start_idx = i * DB_INSERT_BATCH_SIZE
         end_idx = min((i + 1) * DB_INSERT_BATCH_SIZE, len(movies_df))
         batch_df = movies_df.iloc[start_idx:end_idx]
-        
+
         try:
             con.register('batch_view', batch_df)
             con.execute('''
@@ -1393,17 +1426,18 @@ def update_movies_info(con):
                     title = batch_view.title,
                     video = batch_view.video,
                     vote_average = batch_view.vote_average,
-                    vote_count = batch_view.vote_count
+                    vote_count = batch_view.vote_count,
+                    updated_at = CURRENT_TIMESTAMP
                 FROM batch_view
                 WHERE movies.id = batch_view.id
             ''')
             log_and_print(f"Movie Info Batch {i+1}/{num_batches} updated ({len(batch_df)} rows)")
         except Exception as e:
             log_and_print(f"Error updating movie batch: {e}", level='error')
-    
+
     save_checkpoint(processed_ids, 'movies_info_checkpoint.pkl')
     log_skipped_ids(skipped_ids, 'movies_info_skipped_ids.log')
-    
+
     total_elapsed = time.time() - start_time
     log_and_print(f'Movies info update complete in {total_elapsed:.2f}s')
 
@@ -1413,40 +1447,59 @@ def update_movies_info(con):
 # =============================================================================
 
 def run_update_job():
-    """Main entry point for the update job."""
     log_and_print("=" * 60)
     log_and_print("STARTING FULL UPDATE JOB")
     log_and_print(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    if DRY_RUN:
+        log_and_print("[DRY RUN MODE] No writes will be made to the database")
+    if SAMPLE_SIZE > 0:
+        log_and_print(f"[SAMPLE MODE] Processing max {SAMPLE_SIZE} items per step")
+    if args.skip_discover:
+        log_and_print("[SKIP] ID discovery will be skipped")
+    if args.skip_info:
+        log_and_print("[SKIP] Info updates will be skipped")
+    if args.skip_cast_crew:
+        log_and_print("[SKIP] Cast/crew updates will be skipped")
     log_and_print("=" * 60)
-    
+
     start_time = time.time()
     con = None
-    
+
     try:
-        con = duckdb.connect(database=DATABASE_PATH, read_only=False)
+        con = duckdb.connect(database=DATABASE_PATH, read_only=DRY_RUN)
     except Exception as e:
         log_and_print(f"Failed to connect to database: {e}", level='error')
         return
-    
+
     try:
-        # Ensure all tables exist
-        ensure_movies_table(con)
-        ensure_tv_shows_table(con)
-        ensure_cast_crew_tables(con)
-        
-        # 1. Discover new IDs from TMDB exports
-        discover_new_movie_ids(con)
-        discover_new_tv_show_ids(con)
-        
-        # 2. Update info for new IDs
-        update_movies_info(con)
-        update_tv_shows_info(con)
-        
-        # 3. Update cast/crew for new IDs
-        update_movie_cast(con)
-        update_movie_crew(con)
-        update_tv_show_cast_crew(con)
-        
+        # Ensure all tables exist (skip in dry run since read_only)
+        if not DRY_RUN:
+            ensure_movies_table(con)
+            ensure_tv_shows_table(con)
+            ensure_cast_crew_tables(con)
+
+        # Step 1: Discover new IDs from TMDB exports
+        if not args.skip_discover:
+            discover_new_movie_ids(con)
+            discover_new_tv_show_ids(con)
+        else:
+            log_and_print("Skipping ID discovery (--skip-discover)")
+
+        # Step 2: Update info for IDs missing details
+        if not args.skip_info:
+            update_movies_info(con)
+            update_tv_shows_info(con)
+        else:
+            log_and_print("Skipping info updates (--skip-info)")
+
+        # Step 3: Update cast/crew for IDs missing credits
+        if not args.skip_cast_crew:
+            update_movie_cast(con)
+            update_movie_crew(con)
+            update_tv_show_cast_crew(con)
+        else:
+            log_and_print("Skipping cast/crew updates (--skip-cast-crew)")
+
     except Exception as e:
         log_and_print(f"Critical error in update job: {e}", level='error')
         import traceback
@@ -1457,11 +1510,11 @@ def run_update_job():
                 con.close()
             except Exception:
                 pass
-    
+
     total_elapsed = time.time() - start_time
     hours, remainder = divmod(total_elapsed, 3600)
     minutes, seconds = divmod(remainder, 60)
-    
+
     log_and_print("=" * 60)
     log_and_print(f"FULL UPDATE JOB COMPLETE in {int(hours)}h {int(minutes)}m {seconds:.2f}s")
     log_and_print("=" * 60)
