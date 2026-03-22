@@ -99,9 +99,9 @@ def record_last_update(con, table_name):
             VALUES (?, ?, ?)
             ON CONFLICT (table_name) DO UPDATE SET
                 last_run = EXCLUDED.last_run,
-                updated_at = CURRENT_TIMESTAMP,
+                updated_at = ?,
                 surrogate_key = EXCLUDED.surrogate_key
-        """, [table_name, now, surrogate_key])
+        """, [table_name, now, surrogate_key, now])
         log_and_print(f"Recorded last_update for {table_name}")
     except Exception as e:
         log_and_print(f"Failed to record last_update for {table_name}: {e}", level='error')
