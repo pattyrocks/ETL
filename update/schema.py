@@ -70,7 +70,7 @@ def ensure_tv_shows_table(con):
 
 def ensure_cast_crew_tables(con):
     con.execute("""
-        CREATE TABLE IF NOT EXISTS tv_show_cast_crew (
+        CREATE TABLE IF NOT EXISTS tv_show_cast (
             tv_id BIGINT,
             person_id BIGINT,
             name VARCHAR,
@@ -86,6 +86,24 @@ def ensure_cast_crew_tables(con):
             total_episode_count INTEGER,
             cast_id BIGINT,
             also_known_as VARCHAR,
+            inserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    """)
+
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS tv_show_crew (
+            tv_id BIGINT,
+            person_id BIGINT,
+            name VARCHAR,
+            credit_id VARCHAR,
+            gender INTEGER,
+            profile_path VARCHAR,
+            known_for_department VARCHAR,
+            popularity DOUBLE,
+            original_name VARCHAR,
+            department VARCHAR,
+            job VARCHAR,
             inserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );

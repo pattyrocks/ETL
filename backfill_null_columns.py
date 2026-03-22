@@ -95,7 +95,7 @@ def check_and_remove_duplicates(con):
             profile_path, known_for_department, popularity, original_name, roles,
             total_episode_count, cast_id, also_known_as
         )) AS dup_count
-        FROM tv_show_cast_crew
+        FROM tv_show_cast
     """).fetchone()[0]
     
     if dup_count == 0:
@@ -113,7 +113,7 @@ def check_and_remove_duplicates(con):
                     tv_id, person_id, name, credit_id, character, cast_order, gender,
                     profile_path, known_for_department, popularity, original_name, roles,
                     total_episode_count, cast_id, also_known_as
-                FROM tv_show_cast_crew
+                FROM tv_show_cast
                 GROUP BY tv_id, person_id, name, credit_id, character, cast_order, gender,
                          profile_path, known_for_department, popularity, original_name, roles,
                          total_episode_count, cast_id, also_known_as
@@ -136,25 +136,25 @@ def check_and_remove_duplicates(con):
                                      total_episode_count, cast_id, also_known_as
                         ORDER BY inserted_at
                     ) AS rn
-                FROM tv_show_cast_crew
+                FROM tv_show_cast
             )
             WHERE rn = 1
         """)
         
         # Get row counts
-        before_count = con.execute("SELECT COUNT(*) FROM tv_show_cast_crew").fetchone()[0]
+        before_count = con.execute("SELECT COUNT(*) FROM tv_show_cast").fetchone()[0]
         
         # Replace table content
-        con.execute("DELETE FROM tv_show_cast_crew")
+        con.execute("DELETE FROM tv_show_cast")
         con.execute("""
-            INSERT INTO tv_show_cast_crew
+            INSERT INTO tv_show_cast
             SELECT tv_id, person_id, name, credit_id, character, cast_order, gender,
                    profile_path, known_for_department, popularity, original_name, roles,
                    total_episode_count, cast_id, also_known_as, inserted_at, updated_at
             FROM dedup_keep
         """)
         
-        after_count = con.execute("SELECT COUNT(*) FROM tv_show_cast_crew").fetchone()[0]
+        after_count = con.execute("SELECT COUNT(*) FROM tv_show_cast").fetchone()[0]
         deleted_batch = before_count - after_count
         deleted_total += deleted_batch
         
@@ -174,7 +174,7 @@ def backfill_null_columns():
     print("Finding rows with null columns...")
     null_rows_df = con.execute("""
         SELECT DISTINCT tv_id 
-        FROM tv_show_cast_crew 
+        FROM tv_show_cast 
         WHERE credit_id IS NULL 
            OR character IS NULL 
            OR cast_order IS NULL 
@@ -218,7 +218,7 @@ def backfill_null_columns():
         for (tv_id, person_id), data in all_updates.items():
             try:
                 con.execute("""
-                    UPDATE tv_show_cast_crew
+                    UPDATE tv_show_cast
                     SET 
                         credit_id = COALESCE(credit_id, ?),
                         character = COALESCE(character, ?),

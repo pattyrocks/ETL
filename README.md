@@ -45,7 +45,8 @@ ETL/
 ├── movies.py                        # Extract full movie details
 ├── scan_integer_columns.py          # Column type audit utility
 ├── test_backup.py                   # Backup inspection and testing tool
-├── tv_show_cast_crew.py             # Extract TV aggregate cast/crew
+├── tv_show_cast.py                  # Extract TV show cast
+├── tv_show_crew.py                  # Extract TV show crew
 ├── tv_shows.py                      # Extract TV show details
 ├── update_job.py                    # Incremental weekly update job
 ├── requirements.txt                 # Python dependencies
@@ -65,7 +66,8 @@ ETL/
 | `movie_cast.py` | Extracts cast data per movie into the `movie_cast` table |
 | `movie_crew.py` | Extracts crew data (directors, producers, etc.) into `movie_crew` |
 | `tv_shows.py` | Extracts detailed TV show info into the `tv_shows` table |
-| `tv_show_cast_crew.py` | Fetches aggregate cast/crew via `/aggregate_credits` into `tv_show_cast_crew` |
+| `tv_show_cast.py` | Fetches cast data via season credits into `tv_show_cast` |
+| `tv_show_crew.py` | Fetches crew data via season credits into `tv_show_crew` |
 | `update_job.py` | Incremental update job — consumes TMDB change feeds, upserts records with progress logging and time forecasting |
 | `backup_to_glacier.py` | Backs up MotherDuck `TMDB` → `TMDB_backup` (timestamped tables) and uploads local `.db` file to AWS S3 |
 | `connection.py` | Centralized MotherDuck/DuckDB connection helper |
@@ -168,7 +170,8 @@ python movie_cast.py
 python movie_crew.py
 python adding_tv_shows_ids.py
 python tv_shows.py
-python tv_show_cast_crew.py
+python tv_show_cast.py
+python tv_show_crew.py
 ```
 
 ### 5. Ongoing incremental updates
@@ -224,7 +227,8 @@ MOTHERDUCK_TOKEN = "your_token"
 | `movie_cast` | One row per movie–person–character | `movie_id`, `person_id`, `name`, `character` |
 | `movie_crew` | One row per movie–person–job | `movie_id`, `person_id`, `name`, `job`, `department` |
 | `tv_shows` | One row per TV show | `id`, `status`, `number_of_seasons`, `last_air_date` |
-| `tv_show_cast_crew` | One row per show–person–role | `tv_id`, `person_id`, `name`, `roles`, `total_episode_count` |
+| `tv_show_cast` | One row per show–person–character | `tv_id`, `person_id`, `name`, `roles`, `total_episode_count` |
+| `tv_show_crew` | One row per show–person–job | `tv_id`, `person_id`, `name`, `job`, `department` |
 | `last_updates` | One row per ETL job | `job_name`, `last_run` |
 
 All tables include `inserted_at` and `updated_at` audit timestamps.

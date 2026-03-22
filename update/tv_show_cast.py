@@ -15,10 +15,7 @@ from update.utils import (
 from update.dedup import check_and_remove_duplicates
 
 
-ALLOWED_DEPARTMENTS = {'Editing', 'Creator', 'Production', 'Writing', 'Directing', 'Acting'}
-
-
-def fetch_tv_show_credits(tv_id):
+def fetch_tv_show_cast(tv_id):
     for attempt in range(MAX_RETRIES):
         try:
             tv = tmdb.TV(tv_id)
@@ -64,10 +61,6 @@ def fetch_tv_show_credits(tv_id):
             processed_cast_data = []
 
             for cast_member in cast_list:
-                dept = cast_member.get('known_for_department')
-                if dept not in ALLOWED_DEPARTMENTS:
-                    continue
-
                 roles = cast_member.get('roles')
 
                 character = cast_member.get('character')
@@ -120,14 +113,14 @@ def fetch_tv_show_credits(tv_id):
             log_and_print(f"HTTPError for tv_id {tv_id}: {e}", level='error')
             return []
         except Exception as e:
-            log_and_print(f"Error fetching credits for tv_id {tv_id}: {e}", level='error')
+            log_and_print(f"Error fetching cast for tv_id {tv_id}: {e}", level='error')
             return []
 
     return []
 
 
-TV_CAST_CREW_PARTITION_COLS = ['tv_id', 'person_id', 'credit_id']
-TV_CAST_CREW_SELECT_COLS = [
+TV_CAST_PARTITION_COLS = ['tv_id', 'person_id', 'credit_id']
+TV_CAST_SELECT_COLS = [
     'tv_id', 'person_id', 'name', 'credit_id', 'character', 'cast_order',
     'gender', 'profile_path', 'known_for_department', 'popularity',
     'original_name', 'roles', 'total_episode_count', 'cast_id',
@@ -135,9 +128,9 @@ TV_CAST_CREW_SELECT_COLS = [
 ]
 
 
-def update_tv_show_cast_crew(con):
+def update_tv_show_cast(con):
     log_and_print("=" * 60)
-    log_and_print("STARTING TV SHOW CAST/CREW UPDATE")
+    log_and_print("STARTING TV SHOW CAST UPDATE")
     log_and_print("=" * 60)
 
     start_time = time.time()
@@ -145,13 +138,13 @@ def update_tv_show_cast_crew(con):
     processed_tv_count = 0
     skipped_ids = []
 
-    processed_ids = load_checkpoint('tv_cast_crew_checkpoint.pkl')
+    processed_ids = load_checkpoint('tv_cast_checkpoint.pkl')
 
     log_and_print('Fetching TV show IDs from MotherDuck...')
 
     try:
         tv_ids_df = con.execute(
-            '''SELECT id FROM tv_shows WHERE id NOT IN (SELECT DISTINCT tv_id FROM tv_show_cast_crew)'''
+            '''SELECT id FROM tv_shows WHERE id NOT IN (SELECT DISTINCT tv_id FROM tv_show_cast)'''
         ).fetchdf()
     except Exception:
         tv_ids_df = con.execute('SELECT id FROM tv_shows').fetchdf()
@@ -163,18 +156,18 @@ def update_tv_show_cast_crew(con):
 
     if total_tv_to_process == 0:
         log_and_print("No new TV shows to process.")
-        check_and_remove_duplicates(con, 'tv_show_cast_crew', TV_CAST_CREW_PARTITION_COLS, TV_CAST_CREW_SELECT_COLS)
+        check_and_remove_duplicates(con, 'tv_show_cast', TV_CAST_PARTITION_COLS, TV_CAST_SELECT_COLS)
         return
 
     if DRY_RUN:
-        log_and_print(f"[DRY RUN] Would fetch cast/crew for {total_tv_to_process} TV shows")
+        log_and_print(f"[DRY RUN] Would fetch cast for {total_tv_to_process} TV shows")
         return
 
     log_and_print(f'Starting parallel API retrieval with {MAX_API_WORKERS} workers...')
 
     with ThreadPoolExecutor(max_workers=MAX_API_WORKERS) as executor:
         future_to_tv_id = {
-            executor.submit(fetch_tv_show_credits, tv_id): tv_id
+            executor.submit(fetch_tv_show_cast, tv_id): tv_id
             for tv_id in tv_ids_to_process
         }
         for future in as_completed(future_to_tv_id):
@@ -189,26 +182,26 @@ def update_tv_show_cast_crew(con):
                 processed_tv_count += 1
                 if processed_tv_count % API_BATCH_SIZE == 0:
                     percent = (processed_tv_count / total_tv_to_process) * 100
-                    log_and_print(f"TV Cast/Crew Progress: {processed_tv_count}/{total_tv_to_process} ({percent:.2f}%)")
-                    save_checkpoint(processed_ids, 'tv_cast_crew_checkpoint.pkl')
+                    log_and_print(f"TV Cast Progress: {processed_tv_count}/{total_tv_to_process} ({percent:.2f}%)")
+                    save_checkpoint(processed_ids, 'tv_cast_checkpoint.pkl')
             except Exception as e:
                 log_and_print(f"Error processing tv_id {tv_id}: {e}", level='error')
                 skipped_ids.append(tv_id)
 
     elapsed = time.time() - start_time
-    log_and_print(f'Finished TV API retrieval in {elapsed:.2f}s')
-    log_and_print(f'Total TV cast/crew members fetched: {len(all_cast_data_flat)}')
+    log_and_print(f'Finished TV cast API retrieval in {elapsed:.2f}s')
+    log_and_print(f'Total TV cast members fetched: {len(all_cast_data_flat)}')
 
     if not all_cast_data_flat:
-        log_and_print("No TV cast/crew data to insert.")
-        check_and_remove_duplicates(con, 'tv_show_cast_crew', TV_CAST_CREW_PARTITION_COLS, TV_CAST_CREW_SELECT_COLS)
-        log_skipped_ids(skipped_ids, 'tv_cast_crew_skipped_ids.log')
+        log_and_print("No TV cast data to insert.")
+        check_and_remove_duplicates(con, 'tv_show_cast', TV_CAST_PARTITION_COLS, TV_CAST_SELECT_COLS)
+        log_skipped_ids(skipped_ids, 'tv_cast_skipped_ids.log')
         return
 
     cast_df = pd.DataFrame(all_cast_data_flat)
-    log_null_columns(cast_df, log_file='tv_cast_crew_null_columns.log')
+    log_null_columns(cast_df, log_file='tv_cast_null_columns.log')
 
-    log_and_print('Inserting TV data into MotherDuck...')
+    log_and_print('Inserting TV cast data into MotherDuck...')
     tv_columns = 'tv_id, person_id, name, credit_id, character, cast_order, gender, profile_path, known_for_department, popularity, original_name, roles, total_episode_count, cast_id, also_known_as'
 
     num_batches = math.ceil(len(cast_df) / DB_INSERT_BATCH_SIZE)
@@ -218,14 +211,14 @@ def update_tv_show_cast_crew(con):
         batch_df = cast_df.iloc[start_idx:end_idx]
         try:
             con.register('batch_df_view', batch_df)
-            con.execute(f"INSERT INTO tv_show_cast_crew ({tv_columns}) SELECT {tv_columns} FROM batch_df_view;")
-            log_and_print(f"TV Batch {i+1}/{num_batches} inserted ({len(batch_df)} rows)")
+            con.execute(f"INSERT INTO tv_show_cast ({tv_columns}) SELECT {tv_columns} FROM batch_df_view;")
+            log_and_print(f"TV Cast Batch {i+1}/{num_batches} inserted ({len(batch_df)} rows)")
         except Exception as e:
-            log_and_print(f"Error inserting TV batch: {e}", level='error')
+            log_and_print(f"Error inserting TV cast batch: {e}", level='error')
 
-    save_checkpoint(processed_ids, 'tv_cast_crew_checkpoint.pkl')
-    check_and_remove_duplicates(con, 'tv_show_cast_crew', TV_CAST_CREW_PARTITION_COLS, TV_CAST_CREW_SELECT_COLS)
-    log_skipped_ids(skipped_ids, 'tv_cast_crew_skipped_ids.log')
+    save_checkpoint(processed_ids, 'tv_cast_checkpoint.pkl')
+    check_and_remove_duplicates(con, 'tv_show_cast', TV_CAST_PARTITION_COLS, TV_CAST_SELECT_COLS)
+    log_skipped_ids(skipped_ids, 'tv_cast_skipped_ids.log')
 
     total_elapsed = time.time() - start_time
-    log_and_print(f'TV show cast/crew update complete in {total_elapsed:.2f}s')
+    log_and_print(f'TV show cast update complete in {total_elapsed:.2f}s')
