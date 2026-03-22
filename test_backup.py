@@ -91,7 +91,7 @@ def test_backup(backup_file):
 
         # Test 3: Check row counts for key tables
         print("\n3. Checking row counts...")
-        key_tables = ['movies', 'tv_shows', 'movie_cast', 'movie_crew', 'tv_show_cast_crew']
+        key_tables = ['movies', 'tv_shows', 'movie_cast', 'movie_crew', 'tv_show_cast', 'tv_show_crew']
 
         for table_name in key_tables:
             try:

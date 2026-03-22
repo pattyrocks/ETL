@@ -13,7 +13,8 @@ from update.movies_info import update_movies_info
 from update.tv_shows_info import update_tv_shows_info
 from update.movie_cast import update_movie_cast
 from update.movie_crew import update_movie_crew
-from update.tv_show_cast_crew import update_tv_show_cast_crew
+from update.tv_show_cast import update_tv_show_cast
+from update.tv_show_crew import update_tv_show_crew
 
 
 def run_update_job():
@@ -66,7 +67,8 @@ def run_update_job():
         if not args.skip_cast_crew:
             update_movie_cast(con)
             update_movie_crew(con)
-            update_tv_show_cast_crew(con)
+            update_tv_show_cast(con)
+            update_tv_show_crew(con)
         else:
             log_and_print("Skipping cast/crew updates (--skip-cast-crew)")
 
