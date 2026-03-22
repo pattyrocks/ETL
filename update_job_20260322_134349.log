@@ -1,0 +1,126 @@
+2026-03-22 13:43:50,212 - INFO - ============================================================
+2026-03-22 13:43:50,213 - INFO - STARTING FULL UPDATE JOB
+2026-03-22 13:43:50,213 - INFO - Timestamp: 2026-03-22 13:43:50
+2026-03-22 13:43:50,213 - INFO - [SAMPLE MODE] Processing max 2 items per step
+2026-03-22 13:43:50,213 - INFO - ============================================================
+2026-03-22 13:43:54,477 - INFO - ============================================================
+2026-03-22 13:43:54,478 - INFO - DISCOVERING NEW MOVIE IDS
+2026-03-22 13:43:54,478 - INFO - ============================================================
+2026-03-22 13:43:54,616 - INFO - Fetching existing movie IDs from database...
+2026-03-22 13:43:55,738 - INFO - Found 972156 existing movie IDs
+2026-03-22 13:43:55,738 - INFO - Downloading TMDB movie IDs export...
+2026-03-22 13:43:55,739 - INFO - Trying to download: http://files.tmdb.org/p/exports/movie_ids_03_22_2026.json.gz
+2026-03-22 13:43:58,270 - INFO - Successfully downloaded: movie_ids_03_22_2026.json.gz (24.26 MB)
+2026-03-22 13:44:00,283 - INFO - Total movie IDs in TMDB: 1173316
+2026-03-22 13:44:00,313 - INFO - New movie IDs to add: 226010
+2026-03-22 13:44:00,316 - INFO - [SAMPLE] Limiting from 226010 to 2 items
+2026-03-22 13:44:00,475 - INFO - Movie ID Progress: 2/2
+2026-03-22 13:44:00,476 - INFO - Inserted 2 new movie IDs in 6.00s
+2026-03-22 13:44:00,476 - INFO - Checking for duplicates in movies...
+2026-03-22 13:44:01,034 - INFO - No duplicates found in movies.
+2026-03-22 13:44:01,225 - INFO - Recorded last_update for movies
+2026-03-22 13:44:01,225 - INFO - ============================================================
+2026-03-22 13:44:01,225 - INFO - DISCOVERING NEW TV SHOW IDS
+2026-03-22 13:44:01,225 - INFO - ============================================================
+2026-03-22 13:44:01,374 - INFO - Fetching existing TV show IDs from database...
+2026-03-22 13:44:02,214 - INFO - Found 176709 existing TV show IDs
+2026-03-22 13:44:02,214 - INFO - Downloading TMDB TV series IDs export...
+2026-03-22 13:44:02,214 - INFO - Trying to download: http://files.tmdb.org/p/exports/tv_series_ids_03_22_2026.json.gz
+2026-03-22 13:44:02,537 - INFO - Successfully downloaded: tv_series_ids_03_22_2026.json.gz (4.42 MB)
+2026-03-22 13:44:02,856 - INFO - Total TV show IDs in TMDB: 217330
+2026-03-22 13:44:02,860 - INFO - New TV show IDs to add: 42958
+2026-03-22 13:44:02,861 - INFO - [SAMPLE] Limiting from 42958 to 2 items
+2026-03-22 13:44:03,015 - INFO - TV Show ID Progress: 2/2
+2026-03-22 13:44:03,015 - INFO - Inserted 2 new TV show IDs in 1.79s
+2026-03-22 13:44:03,016 - INFO - Checking for duplicates in tv_shows...
+2026-03-22 13:44:03,169 - INFO - No duplicates found in tv_shows.
+2026-03-22 13:44:03,331 - INFO - Recorded last_update for tv_shows
+2026-03-22 13:44:03,332 - INFO - ============================================================
+2026-03-22 13:44:03,332 - INFO - STARTING MOVIES INFO UPDATE
+2026-03-22 13:44:03,332 - INFO - ============================================================
+2026-03-22 13:44:03,517 - INFO - [SAMPLE] Limiting from 8889 to 2 items
+2026-03-22 13:44:03,518 - INFO - Starting movie info retrieval for 2 movies...
+2026-03-22 13:44:04,038 - INFO - Movie info API retrieval complete in 0.71s
+2026-03-22 13:44:04,038 - INFO - Successfully fetched: 0, Skipped: 2
+2026-03-22 13:44:04,039 - INFO - No movie data to update.
+2026-03-22 13:44:04,040 - WARNING - Wrote 2 skipped IDs to movies_info_skipped_ids.log
+2026-03-22 13:44:04,186 - INFO - Recorded last_update for movies
+2026-03-22 13:44:04,186 - INFO - ============================================================
+2026-03-22 13:44:04,186 - INFO - STARTING TV SHOWS INFO UPDATE
+2026-03-22 13:44:04,186 - INFO - ============================================================
+2026-03-22 13:44:04,359 - INFO - [SAMPLE] Limiting from 21287 to 2 items
+2026-03-22 13:44:04,361 - INFO - Starting TV show info retrieval for 2 shows...
+2026-03-22 13:44:04,797 - INFO - TV show info API retrieval complete in 0.61s
+2026-03-22 13:44:04,797 - INFO - Successfully fetched: 2, Skipped: 0
+2026-03-22 13:44:04,806 - INFO - Null column log written to tv_shows_info_null_columns.log
+2026-03-22 13:44:04,806 - INFO - Updating TV shows in database...
+2026-03-22 13:44:05,439 - INFO - TV Show Info Batch 1/1 updated (2 rows)
+2026-03-22 13:44:05,439 - INFO - Checking for duplicates in tv_shows...
+2026-03-22 13:44:05,643 - INFO - No duplicates found in tv_shows.
+2026-03-22 13:44:05,644 - INFO - TV shows info update complete in 1.46s
+2026-03-22 13:44:05,790 - INFO - Recorded last_update for tv_shows
+2026-03-22 13:44:05,790 - INFO - ============================================================
+2026-03-22 13:44:05,790 - INFO - STARTING MOVIE CAST UPDATE
+2026-03-22 13:44:05,790 - INFO - ============================================================
+2026-03-22 13:44:05,790 - INFO - Fetching movie IDs from MotherDuck...
+2026-03-22 13:44:06,716 - INFO - [SAMPLE] Limiting from 273825 to 2 items
+2026-03-22 13:44:06,717 - INFO - Found 2 movie IDs to process.
+2026-03-22 13:44:06,717 - INFO - Starting parallel API retrieval with 15 workers...
+2026-03-22 13:44:07,218 - INFO - Finished movie cast API retrieval in 1.43s
+2026-03-22 13:44:07,218 - INFO - Total cast members fetched: 0
+2026-03-22 13:44:07,218 - INFO - No movie cast data to insert.
+2026-03-22 13:44:07,218 - INFO - Checking for duplicates in movie_cast...
+2026-03-22 13:44:11,602 - INFO - No duplicates found in movie_cast.
+2026-03-22 13:44:11,605 - WARNING - Wrote 2 skipped IDs to movie_cast_skipped_ids.log
+2026-03-22 13:44:11,758 - INFO - Recorded last_update for movie_cast
+2026-03-22 13:44:11,758 - INFO - ============================================================
+2026-03-22 13:44:11,758 - INFO - STARTING MOVIE CREW UPDATE
+2026-03-22 13:44:11,758 - INFO - ============================================================
+2026-03-22 13:44:11,759 - INFO - Fetching movie IDs from MotherDuck...
+2026-03-22 13:44:12,803 - INFO - [SAMPLE] Limiting from 105597 to 2 items
+2026-03-22 13:44:12,804 - INFO - Found 2 movie IDs to process.
+2026-03-22 13:44:12,804 - INFO - Starting parallel API retrieval with 15 workers...
+2026-03-22 13:44:13,405 - INFO - Finished movie crew API retrieval in 1.65s
+2026-03-22 13:44:13,406 - INFO - Total crew members fetched: 1
+2026-03-22 13:44:13,409 - INFO - Null column log written to movie_crew_null_columns.log
+2026-03-22 13:44:13,409 - INFO - Inserting movie crew data into MotherDuck...
+2026-03-22 13:44:14,035 - INFO - Movie Crew Batch 1/1 inserted (1 rows)
+2026-03-22 13:44:14,036 - INFO - Checking for duplicates in movie_crew...
+2026-03-22 13:44:14,359 - INFO - No duplicates found in movie_crew.
+2026-03-22 13:44:14,360 - WARNING - Wrote 1 skipped IDs to movie_crew_skipped_ids.log
+2026-03-22 13:44:14,360 - INFO - Movie crew update complete in 2.60s
+2026-03-22 13:44:14,559 - INFO - Recorded last_update for movie_crew
+2026-03-22 13:44:14,559 - INFO - ============================================================
+2026-03-22 13:44:14,560 - INFO - STARTING TV SHOW CAST UPDATE
+2026-03-22 13:44:14,560 - INFO - ============================================================
+2026-03-22 13:44:14,560 - INFO - Fetching TV show IDs from MotherDuck...
+2026-03-22 13:44:15,101 - INFO - [SAMPLE] Limiting from 169672 to 2 items
+2026-03-22 13:44:15,103 - INFO - Found 2 TV show IDs to process.
+2026-03-22 13:44:15,103 - INFO - Starting parallel API retrieval with 15 workers...
+2026-03-22 13:44:16,139 - INFO - Finished TV cast API retrieval in 1.58s
+2026-03-22 13:44:16,139 - INFO - Total TV cast members fetched: 11
+2026-03-22 13:44:16,141 - INFO - Null column log written to tv_cast_null_columns.log
+2026-03-22 13:44:16,141 - INFO - Inserting TV cast data into MotherDuck...
+2026-03-22 13:44:16,656 - INFO - TV Cast Batch 1/1 inserted (11 rows)
+2026-03-22 13:44:16,658 - INFO - Checking for duplicates in tv_show_cast...
+2026-03-22 13:44:16,846 - INFO - No duplicates found in tv_show_cast.
+2026-03-22 13:44:16,847 - WARNING - Wrote 1 skipped IDs to tv_cast_skipped_ids.log
+2026-03-22 13:44:16,847 - INFO - TV show cast update complete in 2.29s
+2026-03-22 13:44:16,992 - INFO - Recorded last_update for tv_show_cast
+2026-03-22 13:44:16,992 - INFO - ============================================================
+2026-03-22 13:44:16,992 - INFO - STARTING TV SHOW CREW UPDATE
+2026-03-22 13:44:16,992 - INFO - ============================================================
+2026-03-22 13:44:16,992 - INFO - Fetching TV show IDs from MotherDuck...
+2026-03-22 13:44:17,520 - INFO - [SAMPLE] Limiting from 175124 to 2 items
+2026-03-22 13:44:17,521 - INFO - Found 2 TV show IDs to process.
+2026-03-22 13:44:17,521 - INFO - Starting parallel API retrieval with 15 workers...
+2026-03-22 13:44:18,543 - INFO - Finished TV crew API retrieval in 1.55s
+2026-03-22 13:44:18,545 - INFO - Total TV crew members fetched: 0
+2026-03-22 13:44:18,545 - INFO - No TV crew data to insert.
+2026-03-22 13:44:18,545 - INFO - Checking for duplicates in tv_show_crew...
+2026-03-22 13:44:18,752 - INFO - No duplicates found in tv_show_crew.
+2026-03-22 13:44:18,753 - WARNING - Wrote 2 skipped IDs to tv_crew_skipped_ids.log
+2026-03-22 13:44:18,944 - INFO - Recorded last_update for tv_show_crew
+2026-03-22 13:44:18,946 - INFO - ============================================================
+2026-03-22 13:44:18,946 - INFO - FULL UPDATE JOB COMPLETE in 0h 0m 28.73s
+2026-03-22 13:44:18,946 - INFO - ============================================================
