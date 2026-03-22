@@ -1,5 +1,5 @@
-from update.config import DRY_RUN
-from update.utils import log_and_print
+from config import DRY_RUN
+from utils import log_and_print
 
 
 def check_and_remove_duplicates(con, table, partition_cols, select_cols):

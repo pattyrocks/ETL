@@ -5,10 +5,10 @@ import tmdbsimple as tmdb
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from requests.exceptions import HTTPError
 
-from update.config import (
+from config import (
     DRY_RUN, MAX_API_WORKERS, DB_INSERT_BATCH_SIZE, API_BATCH_SIZE, MAX_RETRIES,
 )
-from update.utils import (
+from utils import (
     log_and_print, handle_rate_limit, save_checkpoint, load_checkpoint,
     log_null_columns, log_skipped_ids, safe_str, apply_sample,
 )

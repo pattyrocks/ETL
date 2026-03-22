@@ -3,18 +3,18 @@ import duckdb
 import traceback
 from datetime import datetime
 
-from update.config import (
+from config import (
     DRY_RUN, SAMPLE_SIZE, DATABASE_PATH, args,
 )
-from update.utils import log_and_print
-from update.schema import ensure_movies_table, ensure_tv_shows_table, ensure_cast_crew_tables
-from update.discovery import discover_new_movie_ids, discover_new_tv_show_ids
-from update.movies_info import update_movies_info
-from update.tv_shows_info import update_tv_shows_info
-from update.movie_cast import update_movie_cast
-from update.movie_crew import update_movie_crew
-from update.tv_show_cast import update_tv_show_cast
-from update.tv_show_crew import update_tv_show_crew
+from utils import log_and_print
+from schema import ensure_movies_table, ensure_tv_shows_table, ensure_cast_crew_tables
+from discovery import discover_new_movie_ids, discover_new_tv_show_ids
+from movies_info import update_movies_info
+from tv_shows_info import update_tv_shows_info
+from movie_cast import update_movie_cast
+from movie_crew import update_movie_crew
+from tv_show_cast import update_tv_show_cast
+from tv_show_crew import update_tv_show_crew
 
 
 def run_update_job():

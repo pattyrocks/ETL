@@ -1,6 +1,6 @@
 import time
 import pickle
-from update.config import (
+from config import (
     logger, DRY_RUN, SAMPLE_SIZE, RATE_LIMIT_RETRY_DELAY
 )
 

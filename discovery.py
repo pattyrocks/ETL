@@ -3,9 +3,9 @@ import gzip
 import json
 import requests
 
-from update.config import DRY_RUN, DB_INSERT_BATCH_SIZE
-from update.utils import log_and_print, apply_sample
-from update.schema import ensure_movies_table, ensure_tv_shows_table
+from config import DRY_RUN, DB_INSERT_BATCH_SIZE
+from utils import log_and_print, apply_sample
+from schema import ensure_movies_table, ensure_tv_shows_table
 
 
 def download_tmdb_export(export_type):
