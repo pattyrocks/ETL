@@ -2,7 +2,7 @@ name: etl-update
 
 on:
   schedule:
-    - cron: '0 3 * * FRI'
+    - cron: '0 3 * * *'
   workflow_dispatch:
     inputs:
       dry_run:
@@ -90,6 +90,15 @@ jobs:
           fi
           echo "Backup found: $LATEST"
 
+      - name: Restore checkpoints from previous run
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          name: etl-checkpoints
+          workflow: etl-update.yml
+          search_artifacts: true
+          if_no_artifact_found: warn
+        continue-on-error: true
+
       - name: Build update_job arguments
         id: build-args
         run: |
@@ -97,9 +106,18 @@ jobs:
           if [ "${{ inputs.dry_run || 'false' }}" = "true" ]; then
             ARGS="$ARGS --dry-run"
           fi
-          if [ "${{ inputs.sample_size || '0' }}" != "0" ]; then
-            ARGS="$ARGS --sample ${{ inputs.sample_size }}"
+
+          # For scheduled runs (no manual input), default to --sample 5000
+          # For manual runs, use the provided sample_size (0 = all)
+          SAMPLE="${{ inputs.sample_size }}"
+          if [ -z "$SAMPLE" ]; then
+            SAMPLE="5000"
+            echo "Scheduled run — defaulting to --sample 5000"
           fi
+          if [ "$SAMPLE" != "0" ]; then
+            ARGS="$ARGS --sample $SAMPLE"
+          fi
+
           if [ "${{ inputs.skip_discover || 'false' }}" = "true" ]; then
             ARGS="$ARGS --skip-discover"
           fi
@@ -121,7 +139,19 @@ jobs:
           S3_BUCKET_NAME: ${{ secrets.S3_BUCKET_NAME }}
         run: |
           set -euo pipefail
+          echo "Checkpoint files found:"
+          ls -la *.pkl 2>/dev/null || echo "  (none)"
           python update_job.py ${{ steps.build-args.outputs.args }}
+
+      - name: Upload checkpoints for next run
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: etl-checkpoints
+          path: '*.pkl'
+          retention-days: 14
+          if-no-files-found: warn
+          overwrite: true
 
       - name: Upload ETL logs
         if: always()
@@ -132,6 +162,5 @@ jobs:
             update_job_*.log
             *_skipped_ids.log
             *_null_columns.log
-            *.pkl
           retention-days: 7
           if-no-files-found: warn
