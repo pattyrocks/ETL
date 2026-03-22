@@ -5,13 +5,23 @@ import tmdbsimple as tmdb
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from requests.exceptions import HTTPError
 
-from update.config import (
+from config import (
     DRY_RUN, MAX_API_WORKERS, DB_INSERT_BATCH_SIZE, API_BATCH_SIZE, MAX_RETRIES,
 )
-from update.utils import (
+from utils import (
     log_and_print, handle_rate_limit, save_checkpoint, load_checkpoint,
     log_null_columns, log_skipped_ids, safe_str, apply_sample,
 )
+from dedup import check_and_remove_duplicates
+
+MOVIE_PARTITION_COLS = ['id']
+MOVIE_SELECT_COLS = [
+    'id', 'adult', 'backdrop_path', 'belongs_to_collection', 'budget', 'genres',
+    'homepage', 'imdb_id', 'origin_country', 'original_language', 'original_title', 'overview',
+    'popularity', 'poster_path', 'production_companies', 'production_countries', 'release_date',
+    'revenue', 'runtime', 'spoken_languages', 'status', 'tagline', 'title', 'video',
+    'vote_average', 'vote_count', 'inserted_at', 'updated_at',
+]
 
 
 def fetch_movie_info(movie_id):
@@ -196,6 +206,8 @@ def update_movies_info(con):
 
     save_checkpoint(processed_ids, 'movies_info_checkpoint.pkl')
     log_skipped_ids(skipped_ids, 'movies_info_skipped_ids.log')
+
+    check_and_remove_duplicates(con, 'movies', MOVIE_PARTITION_COLS, MOVIE_SELECT_COLS)
 
     total_elapsed = time.time() - start_time
     log_and_print(f'Movies info update complete in {total_elapsed:.2f}s')

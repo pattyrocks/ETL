@@ -38,30 +38,16 @@ def ensure_tv_shows_table(con):
         CREATE TABLE IF NOT EXISTS tv_shows (
             id BIGINT PRIMARY KEY,
             name VARCHAR,
-            overview VARCHAR,
-            poster_path VARCHAR,
-            backdrop_path VARCHAR,
-            popularity DOUBLE,
-            vote_average DOUBLE,
-            vote_count INTEGER,
-            first_air_date DATE,
-            last_air_date DATE,
-            episode_run_time VARCHAR,
-            homepage VARCHAR,
+            episode_run_time VARCHAR[],
             in_production BOOLEAN,
-            number_of_episodes INTEGER,
-            number_of_seasons INTEGER,
-            origin_country VARCHAR,
-            original_language VARCHAR,
-            original_name VARCHAR,
+            popularity INTEGER,
+            last_air_date VARCHAR,
+            number_of_episodes DOUBLE,
+            number_of_seasons DOUBLE,
+            origin_country VARCHAR[],
             production_countries VARCHAR,
-            genres VARCHAR,
-            networks VARCHAR,
-            created_by VARCHAR,
             status VARCHAR,
             type VARCHAR,
-            tagline VARCHAR,
-            adult BOOLEAN,
             inserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
@@ -85,9 +71,9 @@ def ensure_cast_crew_tables(con):
             roles VARCHAR,
             total_episode_count INTEGER,
             cast_id BIGINT,
-            also_known_as VARCHAR,
             inserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            surrogate_key VARCHAR
         );
     """)
 
@@ -97,15 +83,19 @@ def ensure_cast_crew_tables(con):
             person_id BIGINT,
             name VARCHAR,
             credit_id VARCHAR,
+            character VARCHAR,
+            cast_order INTEGER,
             gender INTEGER,
             profile_path VARCHAR,
             known_for_department VARCHAR,
             popularity DOUBLE,
             original_name VARCHAR,
-            department VARCHAR,
-            job VARCHAR,
+            roles VARCHAR,
+            total_episode_count INTEGER,
+            cast_id BIGINT,
             inserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            surrogate_key VARCHAR
         );
     """)
 
@@ -124,7 +114,8 @@ def ensure_cast_crew_tables(con):
             original_name VARCHAR,
             cast_id BIGINT,
             inserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            surrogate_key VARCHAR
         );
     """)
 
@@ -135,14 +126,31 @@ def ensure_cast_crew_tables(con):
             name VARCHAR,
             credit_id VARCHAR,
             gender INTEGER,
-            profile_path VARCHAR,
             known_for_department VARCHAR,
             popularity DOUBLE,
-            original_name VARCHAR,
             adult BOOLEAN,
             department VARCHAR,
             job VARCHAR,
             inserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            surrogate_key VARCHAR
+        );
+    """)
+
+
+def ensure_last_updates_table(con):
+    # Recreate with PRIMARY KEY if it doesn't already have one
+    try:
+        con.execute("SELECT 1 FROM last_updates WHERE table_name = 'test' ON CONFLICT DO NOTHING")
+    except Exception:
+        # Table either doesn't exist or lacks PK — rebuild it
+        con.execute("DROP TABLE IF EXISTS last_updates")
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS last_updates (
+            table_name VARCHAR PRIMARY KEY,
+            last_run TIMESTAMP,
+            inserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            surrogate_key VARCHAR
         );
     """)

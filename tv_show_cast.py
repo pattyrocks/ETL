@@ -1,179 +1,224 @@
-import os
-import duckdb
-import pandas as pd
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import math
+import pandas as pd
+import tmdbsimple as tmdb
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from requests.exceptions import HTTPError
 
-API_KEY = os.getenv('TMDBAPIKEY')
-DATABASE_PATH = 'TMDB'
+from config import (
+    DRY_RUN, MAX_API_WORKERS, DB_INSERT_BATCH_SIZE, API_BATCH_SIZE, MAX_RETRIES,
+)
+from utils import (
+    log_and_print, handle_rate_limit, save_checkpoint, load_checkpoint,
+    log_null_columns, log_skipped_ids, apply_sample, generate_surrogate_key,
+)
+from dedup import check_and_remove_duplicates
 
-MAX_API_WORKERS = 15
-DB_INSERT_BATCH_SIZE = None  # None means insert all at once
 
 def fetch_tv_show_cast(tv_id):
-    """
-    Fetches cast for the most recent season of a TV show using tmdbsimple.
-    Returns a list of cast dictionaries with tv_id.
-    Returns an empty list on failure.
-    """
-    try:
-        import tmdbsimple as tmdb
-        tmdb.API_KEY = API_KEY
-        tv = tmdb.TV(tv_id)
-        tv_info = tv.info()
-        seasons = tv_info.get('seasons', [])
-        if not seasons:
+    for attempt in range(MAX_RETRIES):
+        try:
+            tv = tmdb.TV(tv_id)
+
+            try:
+                tv_info = tv.info()
+            except HTTPError as e:
+                if e.response.status_code == 404:
+                    return []
+                if e.response.status_code == 429:
+                    handle_rate_limit(attempt)
+                    continue
+                raise
+
+            seasons = tv_info.get('seasons', [])
+            if not seasons:
+                return []
+
+            seasons_sorted = sorted(
+                [s for s in seasons if s.get('season_number') is not None],
+                key=lambda s: (s.get('air_date') or '', s['season_number']),
+                reverse=True
+            )
+
+            if not seasons_sorted:
+                return []
+
+            recent_season = seasons_sorted[0]
+            season_number = recent_season['season_number']
+            season = tmdb.TV_Seasons(tv_id, season_number)
+
+            try:
+                credits = season.credits()
+            except HTTPError as e:
+                if e.response.status_code == 404:
+                    return []
+                if e.response.status_code == 429:
+                    handle_rate_limit(attempt)
+                    continue
+                raise
+
+            cast_list = credits.get('cast', [])
+            processed_cast_data = []
+
+            for cast_member in cast_list:
+                roles = cast_member.get('roles')
+
+                character = cast_member.get('character')
+                if not character and roles and isinstance(roles, list) and len(roles) > 0:
+                    character = roles[0].get('character')
+
+                cast_order = cast_member.get('order')
+                if cast_order is None:
+                    cast_order = cast_member.get('cast_order')
+
+                credit_id = cast_member.get('credit_id')
+                if not credit_id and roles and isinstance(roles, list) and len(roles) > 0:
+                    credit_id = roles[0].get('credit_id')
+
+                cast_id = cast_member.get('cast_id')
+                if cast_id is None:
+                    cast_id = cast_member.get('id')
+
+                also_known_as = cast_member.get('also_known_as')
+                if also_known_as and isinstance(also_known_as, list):
+                    also_known_as = str(also_known_as)
+
+                total_episode_count = cast_member.get('total_episode_count')
+                if total_episode_count is None and roles and isinstance(roles, list):
+                    total_episode_count = sum(r.get('episode_count', 0) for r in roles)
+
+                processed_cast_data.append({
+                    'tv_id': tv_id,
+                    'person_id': cast_member.get('id'),
+                    'name': cast_member.get('name'),
+                    'credit_id': credit_id,
+                    'character': character,
+                    'cast_order': cast_order,
+                    'gender': cast_member.get('gender'),
+                    'profile_path': cast_member.get('profile_path'),
+                    'known_for_department': cast_member.get('known_for_department'),
+                    'popularity': cast_member.get('popularity'),
+                    'original_name': cast_member.get('original_name'),
+                    'roles': str(roles) if roles else None,
+                    'total_episode_count': total_episode_count,
+                    'cast_id': cast_id,
+                    'surrogate_key': generate_surrogate_key(tv_id, cast_member.get('id'), credit_id),
+                })
+            return processed_cast_data
+
+        except HTTPError as e:
+            if e.response.status_code == 429:
+                handle_rate_limit(attempt)
+                continue
+            log_and_print(f"HTTPError for tv_id {tv_id}: {e}", level='error')
             return []
-        seasons_sorted = sorted(
-            [s for s in seasons if s.get('season_number') is not None],
-            key=lambda s: (s.get('air_date') or '', s['season_number']),
-            reverse=True
-        )
-        recent_season = seasons_sorted[0]
-        season_number = recent_season['season_number']
-        season = tmdb.TV_Seasons(tv_id, season_number)
-        credits = season.credits()
-        cast_list = credits.get('cast', [])
-        processed_cast_data = []
-        for cast_member_dict in cast_list:
-            character = cast_member_dict.get('character')
-            roles = cast_member_dict.get('roles')
-            if not character and roles and isinstance(roles, list) and len(roles) > 0:
-                character = roles[0].get('character')
+        except Exception as e:
+            log_and_print(f"Error fetching cast for tv_id {tv_id}: {e}", level='error')
+            return []
 
-            cast_order = cast_member_dict.get('order')
-            if cast_order is None:
-                cast_order = cast_member_dict.get('cast_order')
+    return []
 
-            credit_id = cast_member_dict.get('credit_id')
-            if not credit_id and roles and isinstance(roles, list) and len(roles) > 0:
-                credit_id = roles[0].get('credit_id')
 
-            cast_id = cast_member_dict.get('cast_id')
-            if cast_id is None:
-                cast_id = cast_member_dict.get('id')
+TV_CAST_PARTITION_COLS = ['tv_id', 'person_id', 'credit_id']
+TV_CAST_SELECT_COLS = [
+    'tv_id', 'person_id', 'name', 'credit_id', 'character', 'cast_order',
+    'gender', 'profile_path', 'known_for_department', 'popularity',
+    'original_name', 'roles', 'total_episode_count', 'cast_id',
+    'inserted_at', 'updated_at', 'surrogate_key'
+]
 
-            also_known_as = cast_member_dict.get('also_known_as')
-            if also_known_as and isinstance(also_known_as, list):
-                also_known_as = str(also_known_as)
 
-            total_episode_count = cast_member_dict.get('total_episode_count')
-            if total_episode_count is None and roles and isinstance(roles, list):
-                total_episode_count = sum(r.get('episode_count', 0) for r in roles)
+def update_tv_show_cast(con):
+    log_and_print("=" * 60)
+    log_and_print("STARTING TV SHOW CAST UPDATE")
+    log_and_print("=" * 60)
 
-            processed_cast_data.append({
-                'tv_id': tv_id,
-                'person_id': cast_member_dict.get('id'),
-                'name': cast_member_dict.get('name'),
-                'credit_id': credit_id,
-                'character': character,
-                'cast_order': cast_order,
-                'gender': cast_member_dict.get('gender'),
-                'profile_path': cast_member_dict.get('profile_path'),
-                'known_for_department': cast_member_dict.get('known_for_department'),
-                'popularity': cast_member_dict.get('popularity'),
-                'original_name': cast_member_dict.get('original_name'),
-                'roles': str(roles) if roles else None,
-                'total_episode_count': total_episode_count,
-                'cast_id': cast_id,
-                'also_known_as': also_known_as
-            })
-        return processed_cast_data
-    except Exception as e:
-        print(f"Error fetching cast for TV show ID {tv_id}: {e}")
-        return []
-
-def create_tv_show_cast():
-    con = duckdb.connect(database=DATABASE_PATH, read_only=False)
-
-    start_overall_time = time.time()
+    start_time = time.time()
     all_cast_data_flat = []
     processed_tv_count = 0
-    total_cast_members_count = 0
+    skipped_ids = []
 
-    tv_ids_df = con.execute(
-        '''SELECT id FROM tv_shows WHERE id NOT IN (SELECT DISTINCT tv_id FROM tv_show_cast)'''
-    ).fetchdf()
-    tv_ids_to_process = tv_ids_df['id'].tolist()
+    processed_ids = load_checkpoint('tv_cast_checkpoint.pkl')
+
+    log_and_print('Fetching TV show IDs from MotherDuck...')
+
+    try:
+        tv_ids_df = con.execute(
+            '''SELECT id FROM tv_shows WHERE id NOT IN (SELECT DISTINCT tv_id FROM tv_show_cast)'''
+        ).fetchdf()
+    except Exception:
+        tv_ids_df = con.execute('SELECT id FROM tv_shows').fetchdf()
+
+    tv_ids_to_process = [tid for tid in tv_ids_df['id'].tolist() if tid not in processed_ids]
+    tv_ids_to_process = apply_sample(tv_ids_to_process)
     total_tv_to_process = len(tv_ids_to_process)
+    log_and_print(f"Found {total_tv_to_process} TV show IDs to process.")
 
     if total_tv_to_process == 0:
-        print("No new TV shows to process.")
-        con.close()
+        log_and_print("No new TV shows to process.")
+        check_and_remove_duplicates(con, 'tv_show_cast', TV_CAST_PARTITION_COLS, TV_CAST_SELECT_COLS)
         return
 
-    print(f"Found {total_tv_to_process} TV show IDs to process.")
-    start_api_fetch_time = time.time()
+    if DRY_RUN:
+        log_and_print(f"[DRY RUN] Would fetch cast for {total_tv_to_process} TV shows")
+        return
+
+    log_and_print(f'Starting parallel API retrieval with {MAX_API_WORKERS} workers...')
 
     with ThreadPoolExecutor(max_workers=MAX_API_WORKERS) as executor:
-        futures = [executor.submit(fetch_tv_show_cast, tv_id) for tv_id in tv_ids_to_process]
+        future_to_tv_id = {
+            executor.submit(fetch_tv_show_cast, tv_id): tv_id
+            for tv_id in tv_ids_to_process
+        }
+        for future in as_completed(future_to_tv_id):
+            tv_id = future_to_tv_id[future]
+            try:
+                cast_data = future.result()
+                if cast_data:
+                    all_cast_data_flat.extend(cast_data)
+                else:
+                    skipped_ids.append(tv_id)
+                processed_ids.add(tv_id)
+                processed_tv_count += 1
+                if processed_tv_count % API_BATCH_SIZE == 0:
+                    percent = (processed_tv_count / total_tv_to_process) * 100
+                    log_and_print(f"TV Cast Progress: {processed_tv_count}/{total_tv_to_process} ({percent:.2f}%)")
+                    save_checkpoint(processed_ids, 'tv_cast_checkpoint.pkl')
+            except Exception as e:
+                log_and_print(f"Error processing tv_id {tv_id}: {e}", level='error')
+                skipped_ids.append(tv_id)
 
-        for future in as_completed(futures):
-            tv_cast_data = future.result()
-            if tv_cast_data:
-                all_cast_data_flat.extend(tv_cast_data)
-                total_cast_members_count += len(tv_cast_data)
-            processed_tv_count += 1
-
-    end_api_fetch_time = time.time()
-    print(f"Finished API retrieval in {end_api_fetch_time - start_api_fetch_time:.2f} seconds.")
-    print(f"Total cast members fetched: {total_cast_members_count}")
+    elapsed = time.time() - start_time
+    log_and_print(f'Finished TV cast API retrieval in {elapsed:.2f}s')
+    log_and_print(f'Total TV cast members fetched: {len(all_cast_data_flat)}')
 
     if not all_cast_data_flat:
-        print("No cast data to insert.")
-        con.close()
+        log_and_print("No TV cast data to insert.")
+        check_and_remove_duplicates(con, 'tv_show_cast', TV_CAST_PARTITION_COLS, TV_CAST_SELECT_COLS)
+        log_skipped_ids(skipped_ids, 'tv_cast_skipped_ids.log')
         return
 
     cast_df = pd.DataFrame(all_cast_data_flat)
+    log_null_columns(cast_df, log_file='tv_cast_null_columns.log')
 
-    try:
-        con.execute("""
-        CREATE TABLE IF NOT EXISTS tv_show_cast (
-            tv_id BIGINT,
-            person_id BIGINT,
-            name VARCHAR,
-            credit_id VARCHAR,
-            character VARCHAR,
-            cast_order INTEGER,
-            gender INTEGER,
-            profile_path VARCHAR,
-            known_for_department VARCHAR,
-            popularity DOUBLE,
-            original_name VARCHAR,
-            roles VARCHAR,
-            total_episode_count INTEGER,
-            cast_id BIGINT,
-            also_known_as VARCHAR,
-            inserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        """)
+    log_and_print('Inserting TV cast data into MotherDuck...')
+    tv_columns = 'tv_id, person_id, name, credit_id, character, cast_order, gender, profile_path, known_for_department, popularity, original_name, roles, total_episode_count, cast_id, surrogate_key'
 
-        con.execute("ALTER TABLE tv_show_cast ADD COLUMN IF NOT EXISTS inserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;")
-        con.execute("ALTER TABLE tv_show_cast ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;")
+    num_batches = math.ceil(len(cast_df) / DB_INSERT_BATCH_SIZE)
+    for i in range(num_batches):
+        start_idx = i * DB_INSERT_BATCH_SIZE
+        end_idx = min((i + 1) * DB_INSERT_BATCH_SIZE, len(cast_df))
+        batch_df = cast_df.iloc[start_idx:end_idx]
+        try:
+            con.register('batch_df_view', batch_df)
+            con.execute(f"INSERT INTO tv_show_cast ({tv_columns}) SELECT {tv_columns} FROM batch_df_view;")
+            log_and_print(f"TV Cast Batch {i+1}/{num_batches} inserted ({len(batch_df)} rows)")
+        except Exception as e:
+            log_and_print(f"Error inserting TV cast batch: {e}", level='error')
 
-        cast_columns = 'tv_id, person_id, name, credit_id, character, cast_order, gender, profile_path, known_for_department, popularity, original_name, roles, total_episode_count, cast_id, also_known_as'
+    save_checkpoint(processed_ids, 'tv_cast_checkpoint.pkl')
+    check_and_remove_duplicates(con, 'tv_show_cast', TV_CAST_PARTITION_COLS, TV_CAST_SELECT_COLS)
+    log_skipped_ids(skipped_ids, 'tv_cast_skipped_ids.log')
 
-        if DB_INSERT_BATCH_SIZE is None or len(cast_df) <= DB_INSERT_BATCH_SIZE:
-            con.register('cast_df_view', cast_df)
-            con.execute(f"INSERT INTO tv_show_cast ({cast_columns}) SELECT {cast_columns} FROM cast_df_view;")
-        else:
-            num_batches = math.ceil(len(cast_df) / DB_INSERT_BATCH_SIZE)
-            for i in range(num_batches):
-                start_idx = i * DB_INSERT_BATCH_SIZE
-                end_idx = min((i + 1) * DB_INSERT_BATCH_SIZE, len(cast_df))
-                batch_df = cast_df.iloc[start_idx:end_idx]
-                con.register('batch_df_view', batch_df)
-                con.execute(f"INSERT INTO tv_show_cast ({cast_columns}) SELECT {cast_columns} FROM batch_df_view;")
-                print(f"Inserted batch {i + 1}/{num_batches}")
-
-    except Exception as e:
-        print(f"Error inserting data: {e}")
-    finally:
-        con.close()
-
-    end_overall_time = time.time()
-    print(f"Total job completed in {end_overall_time - start_overall_time:.2f} seconds.")
-
-create_tv_show_cast()
+    total_elapsed = time.time() - start_time
+    log_and_print(f'TV show cast update complete in {total_elapsed:.2f}s')

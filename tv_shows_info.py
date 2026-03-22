@@ -5,13 +5,23 @@ import tmdbsimple as tmdb
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from requests.exceptions import HTTPError
 
-from update.config import (
+from config import (
     DRY_RUN, MAX_API_WORKERS, DB_INSERT_BATCH_SIZE, API_BATCH_SIZE, MAX_RETRIES,
 )
-from update.utils import (
+from utils import (
     log_and_print, handle_rate_limit, save_checkpoint, load_checkpoint,
     log_null_columns, log_skipped_ids, safe_str, apply_sample,
 )
+from dedup import check_and_remove_duplicates
+
+TV_SHOW_PARTITION_COLS = ['id']
+TV_SHOW_SELECT_COLS = [
+    'id', 'name', 'episode_run_time',
+    'in_production', 'popularity', 'last_air_date',
+    'number_of_episodes', 'number_of_seasons',
+    'origin_country', 'production_countries', 'status', 'type',
+    'inserted_at', 'updated_at',
+]
 
 
 def fetch_tv_show_info(tv_id):
@@ -22,30 +32,16 @@ def fetch_tv_show_info(tv_id):
             return {
                 'id': tv_info.get('id'),
                 'name': tv_info.get('name'),
-                'overview': tv_info.get('overview'),
-                'poster_path': tv_info.get('poster_path'),
-                'backdrop_path': tv_info.get('backdrop_path'),
                 'popularity': tv_info.get('popularity'),
-                'vote_average': tv_info.get('vote_average'),
-                'vote_count': tv_info.get('vote_count'),
-                'first_air_date': tv_info.get('first_air_date') or None,
                 'last_air_date': tv_info.get('last_air_date') or None,
                 'episode_run_time': safe_str(tv_info.get('episode_run_time')),
-                'homepage': tv_info.get('homepage'),
                 'in_production': tv_info.get('in_production'),
                 'number_of_episodes': tv_info.get('number_of_episodes'),
                 'number_of_seasons': tv_info.get('number_of_seasons'),
                 'origin_country': safe_str(tv_info.get('origin_country')),
-                'original_language': tv_info.get('original_language'),
-                'original_name': tv_info.get('original_name'),
                 'production_countries': safe_str(tv_info.get('production_countries')),
-                'genres': safe_str(tv_info.get('genres')),
-                'networks': safe_str(tv_info.get('networks')),
-                'created_by': safe_str(tv_info.get('created_by')),
                 'status': tv_info.get('status'),
                 'type': tv_info.get('type'),
-                'tagline': tv_info.get('tagline'),
-                'adult': tv_info.get('adult'),
             }
 
         except HTTPError as e:
@@ -135,14 +131,13 @@ def update_tv_shows_info(con):
 
     tv_df = pd.DataFrame(all_tv_data)
 
-    TV_SHOW_COLUMNS = ['id', 'name', 'overview', 'poster_path', 'backdrop_path', 'popularity',
-        'vote_average', 'vote_count', 'first_air_date', 'last_air_date', 'episode_run_time',
-        'homepage', 'in_production', 'number_of_episodes', 'number_of_seasons', 'origin_country',
-        'original_language', 'original_name', 'production_countries', 'genres', 'networks',
-        'created_by', 'status', 'type', 'tagline', 'adult']
+    TV_SHOW_COLUMNS = ['id', 'name', 'episode_run_time',
+        'in_production', 'popularity', 'last_air_date',
+        'number_of_episodes', 'number_of_seasons',
+        'origin_country', 'production_countries', 'status', 'type']
     tv_df = tv_df[[c for c in TV_SHOW_COLUMNS if c in tv_df.columns]]
 
-    for date_col in ['first_air_date', 'last_air_date']:
+    for date_col in ['last_air_date']:
         if date_col in tv_df.columns:
             tv_df[date_col] = tv_df[date_col].replace('', None)
 
@@ -162,30 +157,16 @@ def update_tv_shows_info(con):
                 UPDATE tv_shows
                 SET
                     name = batch_view.name,
-                    overview = batch_view.overview,
-                    poster_path = batch_view.poster_path,
-                    backdrop_path = batch_view.backdrop_path,
                     popularity = batch_view.popularity,
-                    vote_average = batch_view.vote_average,
-                    vote_count = batch_view.vote_count,
-                    first_air_date = batch_view.first_air_date,
                     last_air_date = batch_view.last_air_date,
                     episode_run_time = batch_view.episode_run_time,
-                    homepage = batch_view.homepage,
                     in_production = batch_view.in_production,
                     number_of_episodes = batch_view.number_of_episodes,
                     number_of_seasons = batch_view.number_of_seasons,
                     origin_country = batch_view.origin_country,
-                    original_language = batch_view.original_language,
-                    original_name = batch_view.original_name,
                     production_countries = batch_view.production_countries,
-                    genres = batch_view.genres,
-                    networks = batch_view.networks,
-                    created_by = batch_view.created_by,
                     status = batch_view.status,
                     type = batch_view.type,
-                    tagline = batch_view.tagline,
-                    adult = batch_view.adult,
                     updated_at = CURRENT_TIMESTAMP
                 FROM batch_view
                 WHERE tv_shows.id = batch_view.id
@@ -196,6 +177,8 @@ def update_tv_shows_info(con):
 
     save_checkpoint(processed_ids, 'tv_shows_info_checkpoint.pkl')
     log_skipped_ids(skipped_ids, 'tv_shows_info_skipped_ids.log')
+
+    check_and_remove_duplicates(con, 'tv_shows', TV_SHOW_PARTITION_COLS, TV_SHOW_SELECT_COLS)
 
     total_elapsed = time.time() - start_time
     log_and_print(f'TV shows info update complete in {total_elapsed:.2f}s')
