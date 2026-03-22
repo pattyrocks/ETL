@@ -182,4 +182,4 @@ ETL/
 
 ---
 
-> Built by [Patricia Nascimento](https://www.linkedin.com/in/patricians)
+> Built by 👩🏽‍💻 [Patricia Nascimento](https://www.linkedin.com/in/patricians)
