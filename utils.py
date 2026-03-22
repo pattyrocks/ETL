@@ -87,7 +87,7 @@ def generate_surrogate_key(*parts):
 
 
 def record_last_update(con, table_name):
-    """Upsert a row into last_updates after a table has been updated."""
+    """Append a row into last_updates after a table has been updated."""
     if DRY_RUN:
         log_and_print(f"[DRY RUN] Would record last_update for {table_name}")
         return
@@ -97,11 +97,7 @@ def record_last_update(con, table_name):
         con.execute("""
             INSERT INTO last_updates (table_name, last_run, surrogate_key)
             VALUES (?, ?, ?)
-            ON CONFLICT (table_name) DO UPDATE SET
-                last_run = EXCLUDED.last_run,
-                updated_at = ?,
-                surrogate_key = EXCLUDED.surrogate_key
-        """, [table_name, now, surrogate_key, now])
+        """, [table_name, now, surrogate_key])
         log_and_print(f"Recorded last_update for {table_name}")
     except Exception as e:
         log_and_print(f"Failed to record last_update for {table_name}: {e}", level='error')

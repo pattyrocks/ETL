@@ -139,15 +139,9 @@ def ensure_cast_crew_tables(con):
 
 
 def ensure_last_updates_table(con):
-    # Recreate with PRIMARY KEY if it doesn't already have one
-    try:
-        con.execute("SELECT 1 FROM last_updates WHERE table_name = 'test' ON CONFLICT DO NOTHING")
-    except Exception:
-        # Table either doesn't exist or lacks PK — rebuild it
-        con.execute("DROP TABLE IF EXISTS last_updates")
     con.execute("""
         CREATE TABLE IF NOT EXISTS last_updates (
-            table_name VARCHAR PRIMARY KEY,
+            table_name VARCHAR,
             last_run TIMESTAMP,
             inserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
