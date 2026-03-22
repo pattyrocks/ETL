@@ -16,10 +16,10 @@ from dedup import check_and_remove_duplicates
 
 MOVIE_PARTITION_COLS = ['id']
 MOVIE_SELECT_COLS = [
-    'id', 'adult', 'backdrop_path', 'belongs_to_collection', 'budget', 'genres',
-    'homepage', 'imdb_id', 'origin_country', 'original_language', 'original_title', 'overview',
-    'popularity', 'poster_path', 'production_companies', 'production_countries', 'release_date',
-    'revenue', 'runtime', 'spoken_languages', 'status', 'tagline', 'title', 'video',
+    'id', 'adult', 'belongs_to_collection', 'budget', 'genres',
+    'homepage', 'imdb_id', 'origin_country', 'original_language', 'original_title',
+    'popularity', 'production_companies', 'production_countries', 'release_date',
+    'revenue', 'runtime', 'spoken_languages', 'status', 'title',
     'vote_average', 'vote_count', 'inserted_at', 'updated_at',
 ]
 
@@ -32,7 +32,6 @@ def fetch_movie_info(movie_id):
             return {
                 'id': movie_info.get('id'),
                 'adult': movie_info.get('adult'),
-                'backdrop_path': movie_info.get('backdrop_path'),
                 'belongs_to_collection': safe_str(movie_info.get('belongs_to_collection')),
                 'budget': movie_info.get('budget'),
                 'genres': safe_str(movie_info.get('genres')),
@@ -41,9 +40,7 @@ def fetch_movie_info(movie_id):
                 'origin_country': movie_info.get('origin_country') if isinstance(movie_info.get('origin_country'), list) else None,
                 'original_language': movie_info.get('original_language'),
                 'original_title': movie_info.get('original_title'),
-                'overview': movie_info.get('overview'),
                 'popularity': movie_info.get('popularity'),
-                'poster_path': movie_info.get('poster_path'),
                 'production_companies': safe_str(movie_info.get('production_companies')),
                 'production_countries': safe_str(movie_info.get('production_countries')),
                 'release_date': movie_info.get('release_date') or None,
@@ -51,9 +48,7 @@ def fetch_movie_info(movie_id):
                 'runtime': movie_info.get('runtime'),
                 'spoken_languages': safe_str(movie_info.get('spoken_languages')),
                 'status': movie_info.get('status'),
-                'tagline': movie_info.get('tagline'),
                 'title': movie_info.get('title'),
-                'video': movie_info.get('video'),
                 'vote_average': movie_info.get('vote_average'),
                 'vote_count': movie_info.get('vote_count'),
             }
@@ -146,10 +141,10 @@ def update_movies_info(con):
 
     movies_df = pd.DataFrame(all_movie_data)
 
-    MOVIE_COLUMNS = ['id', 'adult', 'backdrop_path', 'belongs_to_collection', 'budget', 'genres',
-        'homepage', 'imdb_id', 'origin_country', 'original_language', 'original_title', 'overview',
-        'popularity', 'poster_path', 'production_companies', 'production_countries', 'release_date',
-        'revenue', 'runtime', 'spoken_languages', 'status', 'tagline', 'title', 'video',
+    MOVIE_COLUMNS = ['id', 'adult', 'belongs_to_collection', 'budget', 'genres',
+        'homepage', 'imdb_id', 'origin_country', 'original_language', 'original_title',
+        'popularity', 'production_companies', 'production_countries', 'release_date',
+        'revenue', 'runtime', 'spoken_languages', 'status', 'title',
         'vote_average', 'vote_count']
     movies_df = movies_df[[c for c in MOVIE_COLUMNS if c in movies_df.columns]]
 
@@ -173,7 +168,6 @@ def update_movies_info(con):
                 UPDATE movies
                 SET
                     adult = batch_view.adult,
-                    backdrop_path = batch_view.backdrop_path,
                     belongs_to_collection = batch_view.belongs_to_collection,
                     budget = batch_view.budget,
                     genres = batch_view.genres,
@@ -182,9 +176,7 @@ def update_movies_info(con):
                     origin_country = batch_view.origin_country,
                     original_language = batch_view.original_language,
                     original_title = batch_view.original_title,
-                    overview = batch_view.overview,
                     popularity = batch_view.popularity,
-                    poster_path = batch_view.poster_path,
                     production_companies = batch_view.production_companies,
                     production_countries = batch_view.production_countries,
                     release_date = batch_view.release_date,
@@ -192,9 +184,7 @@ def update_movies_info(con):
                     runtime = batch_view.runtime,
                     spoken_languages = batch_view.spoken_languages,
                     status = batch_view.status,
-                    tagline = batch_view.tagline,
                     title = batch_view.title,
-                    video = batch_view.video,
                     vote_average = batch_view.vote_average,
                     vote_count = batch_view.vote_count,
                     updated_at = CURRENT_TIMESTAMP
