@@ -10,7 +10,7 @@ from config import (
 )
 from utils import (
     log_and_print, handle_rate_limit, save_checkpoint, load_checkpoint,
-    log_null_columns, log_skipped_ids, apply_sample,
+    log_null_columns, log_skipped_ids, apply_sample, generate_surrogate_key,
 )
 from dedup import check_and_remove_duplicates
 
@@ -62,18 +62,50 @@ def fetch_tv_show_crew(tv_id):
 
             # Limit crew to 50 per show to avoid excessive data
             for crew_member in crew_list[:50]:
+                roles = crew_member.get('roles')
+
+                character = crew_member.get('character')
+                if not character and roles and isinstance(roles, list) and len(roles) > 0:
+                    character = roles[0].get('character')
+
+                cast_order = crew_member.get('order')
+                if cast_order is None:
+                    cast_order = crew_member.get('cast_order')
+
+                credit_id = crew_member.get('credit_id')
+                if not credit_id and roles and isinstance(roles, list) and len(roles) > 0:
+                    credit_id = roles[0].get('credit_id')
+
+                cast_id = crew_member.get('cast_id')
+                if cast_id is None:
+                    cast_id = crew_member.get('id')
+
+                also_known_as = crew_member.get('also_known_as')
+                if also_known_as and isinstance(also_known_as, list):
+                    also_known_as = str(also_known_as)
+
+                total_episode_count = crew_member.get('total_episode_count')
+                if total_episode_count is None and roles and isinstance(roles, list):
+                    total_episode_count = sum(r.get('episode_count', 0) for r in roles)
+
+                person_id = crew_member.get('id')
                 processed_crew_data.append({
                     'tv_id': tv_id,
-                    'person_id': crew_member.get('id'),
+                    'person_id': person_id,
                     'name': crew_member.get('name'),
-                    'credit_id': crew_member.get('credit_id'),
+                    'credit_id': credit_id,
+                    'character': character,
+                    'cast_order': cast_order,
                     'gender': crew_member.get('gender'),
                     'profile_path': crew_member.get('profile_path'),
                     'known_for_department': crew_member.get('known_for_department'),
                     'popularity': crew_member.get('popularity'),
                     'original_name': crew_member.get('original_name'),
-                    'department': crew_member.get('department'),
-                    'job': crew_member.get('job'),
+                    'roles': str(roles) if roles else None,
+                    'total_episode_count': total_episode_count,
+                    'cast_id': cast_id,
+                    'also_known_as': also_known_as,
+                    'surrogate_key': generate_surrogate_key(tv_id, person_id, credit_id),
                 })
             return processed_crew_data
 
@@ -92,9 +124,10 @@ def fetch_tv_show_crew(tv_id):
 
 TV_CREW_PARTITION_COLS = ['tv_id', 'person_id', 'credit_id']
 TV_CREW_SELECT_COLS = [
-    'tv_id', 'person_id', 'name', 'credit_id', 'gender', 'profile_path',
-    'known_for_department', 'popularity', 'original_name', 'department',
-    'job', 'inserted_at', 'updated_at'
+    'tv_id', 'person_id', 'name', 'credit_id', 'character', 'cast_order',
+    'gender', 'profile_path', 'known_for_department', 'popularity',
+    'original_name', 'roles', 'total_episode_count', 'cast_id',
+    'also_known_as', 'inserted_at', 'updated_at', 'surrogate_key'
 ]
 
 
@@ -172,7 +205,7 @@ def update_tv_show_crew(con):
     log_null_columns(crew_df, log_file='tv_crew_null_columns.log')
 
     log_and_print('Inserting TV crew data into MotherDuck...')
-    tv_columns = 'tv_id, person_id, name, credit_id, gender, profile_path, known_for_department, popularity, original_name, department, job'
+    tv_columns = 'tv_id, person_id, name, credit_id, character, cast_order, gender, profile_path, known_for_department, popularity, original_name, roles, total_episode_count, cast_id, also_known_as, surrogate_key'
 
     num_batches = math.ceil(len(crew_df) / DB_INSERT_BATCH_SIZE)
     for i in range(num_batches):

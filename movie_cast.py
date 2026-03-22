@@ -10,7 +10,7 @@ from config import (
 )
 from utils import (
     log_and_print, handle_rate_limit, save_checkpoint, load_checkpoint,
-    log_null_columns, log_skipped_ids, apply_sample,
+    log_null_columns, log_skipped_ids, apply_sample, generate_surrogate_key,
 )
 from dedup import check_and_remove_duplicates
 
@@ -32,11 +32,13 @@ def fetch_movie_cast(movie_id):
             processed_cast_data = []
 
             for cast_member_dict in cast_list:  # No limit for cast
+                person_id = cast_member_dict.get('id')
+                credit_id = cast_member_dict.get('credit_id')
                 processed_cast_data.append({
                     'movie_id': movie_id,
-                    'person_id': cast_member_dict.get('id'),
+                    'person_id': person_id,
                     'name': cast_member_dict.get('name'),
-                    'credit_id': cast_member_dict.get('credit_id'),
+                    'credit_id': credit_id,
                     'character': cast_member_dict.get('character'),
                     'cast_order': cast_member_dict.get('order'),
                     'gender': cast_member_dict.get('gender'),
@@ -45,6 +47,7 @@ def fetch_movie_cast(movie_id):
                     'popularity': cast_member_dict.get('popularity'),
                     'original_name': cast_member_dict.get('original_name'),
                     'cast_id': cast_member_dict.get('cast_id'),
+                    'surrogate_key': generate_surrogate_key(movie_id, person_id, credit_id),
                 })
             return processed_cast_data
 
@@ -65,7 +68,7 @@ MOVIE_CAST_PARTITION_COLS = ['movie_id', 'person_id', 'credit_id']
 MOVIE_CAST_SELECT_COLS = [
     'movie_id', 'person_id', 'name', 'credit_id', 'character', 'cast_order',
     'gender', 'profile_path', 'known_for_department', 'popularity',
-    'original_name', 'cast_id', 'inserted_at', 'updated_at'
+    'original_name', 'cast_id', 'inserted_at', 'updated_at', 'surrogate_key'
 ]
 
 
@@ -147,7 +150,7 @@ def update_movie_cast(con):
     log_null_columns(cast_df, log_file='movie_cast_null_columns.log')
 
     log_and_print('Inserting movie cast data into MotherDuck...')
-    cast_columns = 'movie_id, person_id, name, credit_id, character, cast_order, gender, profile_path, known_for_department, popularity, original_name, cast_id'
+    cast_columns = 'movie_id, person_id, name, credit_id, character, cast_order, gender, profile_path, known_for_department, popularity, original_name, cast_id, surrogate_key'
 
     num_batches = math.ceil(len(cast_df) / DB_INSERT_BATCH_SIZE)
     for i in range(num_batches):

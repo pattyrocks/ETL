@@ -10,7 +10,7 @@ from config import (
 )
 from utils import (
     log_and_print, handle_rate_limit, save_checkpoint, load_checkpoint,
-    log_null_columns, log_skipped_ids, apply_sample,
+    log_null_columns, log_skipped_ids, apply_sample, generate_surrogate_key,
 )
 from dedup import check_and_remove_duplicates
 
@@ -33,19 +33,20 @@ def fetch_movie_crew(movie_id):
 
             # Limit crew to 50 per movie
             for crew_member_dict in crew_list[:50]:
+                person_id = crew_member_dict.get('id')
+                credit_id = crew_member_dict.get('credit_id')
                 processed_crew_data.append({
                     'movie_id': movie_id,
-                    'person_id': crew_member_dict.get('id'),
+                    'person_id': person_id,
                     'name': crew_member_dict.get('name'),
-                    'credit_id': crew_member_dict.get('credit_id'),
+                    'credit_id': credit_id,
                     'gender': crew_member_dict.get('gender'),
-                    'profile_path': crew_member_dict.get('profile_path'),
                     'known_for_department': crew_member_dict.get('known_for_department'),
                     'popularity': crew_member_dict.get('popularity'),
-                    'original_name': crew_member_dict.get('original_name'),
                     'adult': crew_member_dict.get('adult'),
                     'department': crew_member_dict.get('department'),
-                    'job': crew_member_dict.get('job')
+                    'job': crew_member_dict.get('job'),
+                    'surrogate_key': generate_surrogate_key(movie_id, person_id, credit_id),
                 })
             return processed_crew_data
 
@@ -64,9 +65,9 @@ def fetch_movie_crew(movie_id):
 
 MOVIE_CREW_PARTITION_COLS = ['movie_id', 'person_id', 'credit_id']
 MOVIE_CREW_SELECT_COLS = [
-    'movie_id', 'person_id', 'name', 'credit_id', 'gender', 'profile_path',
-    'known_for_department', 'popularity', 'original_name', 'adult',
-    'department', 'job', 'inserted_at', 'updated_at'
+    'movie_id', 'person_id', 'name', 'credit_id', 'gender',
+    'known_for_department', 'popularity', 'adult',
+    'department', 'job', 'inserted_at', 'updated_at', 'surrogate_key'
 ]
 
 
@@ -148,7 +149,7 @@ def update_movie_crew(con):
     log_null_columns(crew_df, log_file='movie_crew_null_columns.log')
 
     log_and_print('Inserting movie crew data into MotherDuck...')
-    crew_columns = 'movie_id, person_id, name, credit_id, gender, profile_path, known_for_department, popularity, original_name, adult, department, job'
+    crew_columns = 'movie_id, person_id, name, credit_id, gender, known_for_department, popularity, adult, department, job, surrogate_key'
 
     num_batches = math.ceil(len(crew_df) / DB_INSERT_BATCH_SIZE)
     for i in range(num_batches):

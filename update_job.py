@@ -6,8 +6,8 @@ from datetime import datetime
 from config import (
     DRY_RUN, SAMPLE_SIZE, DATABASE_PATH, args,
 )
-from utils import log_and_print
-from schema import ensure_movies_table, ensure_tv_shows_table, ensure_cast_crew_tables
+from utils import log_and_print, record_last_update
+from schema import ensure_movies_table, ensure_tv_shows_table, ensure_cast_crew_tables, ensure_last_updates_table
 from discovery import discover_new_movie_ids, discover_new_tv_show_ids
 from movies_info import update_movies_info
 from tv_shows_info import update_tv_shows_info
@@ -48,27 +48,36 @@ def run_update_job():
             ensure_movies_table(con)
             ensure_tv_shows_table(con)
             ensure_cast_crew_tables(con)
+            ensure_last_updates_table(con)
 
         # Step 1: Discover new IDs from TMDB exports
         if not args.skip_discover:
             discover_new_movie_ids(con)
+            record_last_update(con, 'movies')
             discover_new_tv_show_ids(con)
+            record_last_update(con, 'tv_shows')
         else:
             log_and_print("Skipping ID discovery (--skip-discover)")
 
         # Step 2: Update info for IDs missing details
         if not args.skip_info:
             update_movies_info(con)
+            record_last_update(con, 'movies')
             update_tv_shows_info(con)
+            record_last_update(con, 'tv_shows')
         else:
             log_and_print("Skipping info updates (--skip-info)")
 
         # Step 3: Update cast/crew for IDs missing credits
         if not args.skip_cast_crew:
             update_movie_cast(con)
+            record_last_update(con, 'movie_cast')
             update_movie_crew(con)
+            record_last_update(con, 'movie_crew')
             update_tv_show_cast(con)
+            record_last_update(con, 'tv_show_cast')
             update_tv_show_crew(con)
+            record_last_update(con, 'tv_show_crew')
         else:
             log_and_print("Skipping cast/crew updates (--skip-cast-crew)")
 

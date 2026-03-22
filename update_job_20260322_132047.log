@@ -1,0 +1,81 @@
+2026-03-22 13:20:48,159 - INFO - ============================================================
+2026-03-22 13:20:48,159 - INFO - STARTING FULL UPDATE JOB
+2026-03-22 13:20:48,159 - INFO - Timestamp: 2026-03-22 13:20:48
+2026-03-22 13:20:48,159 - INFO - [DRY RUN MODE] No writes will be made to the database
+2026-03-22 13:20:48,159 - INFO - [SAMPLE MODE] Processing max 2 items per step
+2026-03-22 13:20:48,159 - INFO - ============================================================
+2026-03-22 13:20:49,502 - INFO - ============================================================
+2026-03-22 13:20:49,502 - INFO - DISCOVERING NEW MOVIE IDS
+2026-03-22 13:20:49,502 - INFO - ============================================================
+2026-03-22 13:20:49,502 - INFO - Fetching existing movie IDs from database...
+2026-03-22 13:20:51,360 - INFO - Found 972152 existing movie IDs
+2026-03-22 13:20:51,360 - INFO - Downloading TMDB movie IDs export...
+2026-03-22 13:20:51,360 - INFO - Trying to download: http://files.tmdb.org/p/exports/movie_ids_03_22_2026.json.gz
+2026-03-22 13:20:53,399 - INFO - Successfully downloaded: movie_ids_03_22_2026.json.gz (24.26 MB)
+2026-03-22 13:20:55,574 - INFO - Total movie IDs in TMDB: 1173316
+2026-03-22 13:20:55,604 - INFO - New movie IDs to add: 226014
+2026-03-22 13:20:55,607 - INFO - [SAMPLE] Limiting from 226014 to 2 items
+2026-03-22 13:20:55,607 - INFO - [DRY RUN] Would insert 2 new movie IDs
+2026-03-22 13:20:55,633 - INFO - [DRY RUN] Would record last_update for movies
+2026-03-22 13:20:55,634 - INFO - ============================================================
+2026-03-22 13:20:55,634 - INFO - DISCOVERING NEW TV SHOW IDS
+2026-03-22 13:20:55,634 - INFO - ============================================================
+2026-03-22 13:20:55,634 - INFO - Fetching existing TV show IDs from database...
+2026-03-22 13:20:56,476 - INFO - Found 176705 existing TV show IDs
+2026-03-22 13:20:56,477 - INFO - Downloading TMDB TV series IDs export...
+2026-03-22 13:20:56,477 - INFO - Trying to download: http://files.tmdb.org/p/exports/tv_series_ids_03_22_2026.json.gz
+2026-03-22 13:20:57,768 - INFO - Successfully downloaded: tv_series_ids_03_22_2026.json.gz (4.42 MB)
+2026-03-22 13:20:58,087 - INFO - Total TV show IDs in TMDB: 217330
+2026-03-22 13:20:58,094 - INFO - New TV show IDs to add: 42962
+2026-03-22 13:20:58,094 - INFO - [SAMPLE] Limiting from 42962 to 2 items
+2026-03-22 13:20:58,094 - INFO - [DRY RUN] Would insert 2 new TV show IDs
+2026-03-22 13:20:58,098 - INFO - [DRY RUN] Would record last_update for tv_shows
+2026-03-22 13:20:58,098 - INFO - ============================================================
+2026-03-22 13:20:58,098 - INFO - STARTING MOVIES INFO UPDATE
+2026-03-22 13:20:58,098 - INFO - ============================================================
+2026-03-22 13:20:58,288 - INFO - [SAMPLE] Limiting from 8883 to 2 items
+2026-03-22 13:20:58,288 - INFO - Starting movie info retrieval for 2 movies...
+2026-03-22 13:20:58,288 - INFO - [DRY RUN] Would fetch info for 2 movies
+2026-03-22 13:20:58,288 - INFO - [DRY RUN] Would record last_update for movies
+2026-03-22 13:20:58,288 - INFO - ============================================================
+2026-03-22 13:20:58,288 - INFO - STARTING TV SHOWS INFO UPDATE
+2026-03-22 13:20:58,288 - INFO - ============================================================
+2026-03-22 13:20:58,591 - INFO - [SAMPLE] Limiting from 21285 to 2 items
+2026-03-22 13:20:58,591 - INFO - Starting TV show info retrieval for 2 shows...
+2026-03-22 13:20:58,591 - INFO - [DRY RUN] Would fetch info for 2 TV shows
+2026-03-22 13:20:58,591 - INFO - [DRY RUN] Would record last_update for tv_shows
+2026-03-22 13:20:58,591 - INFO - ============================================================
+2026-03-22 13:20:58,591 - INFO - STARTING MOVIE CAST UPDATE
+2026-03-22 13:20:58,591 - INFO - ============================================================
+2026-03-22 13:20:58,591 - INFO - Fetching movie IDs from MotherDuck...
+2026-03-22 13:20:59,345 - INFO - [SAMPLE] Limiting from 273819 to 2 items
+2026-03-22 13:20:59,346 - INFO - Found 2 movie IDs to process.
+2026-03-22 13:20:59,346 - INFO - [DRY RUN] Would fetch cast for 2 movies
+2026-03-22 13:20:59,347 - INFO - [DRY RUN] Would record last_update for movie_cast
+2026-03-22 13:20:59,347 - INFO - ============================================================
+2026-03-22 13:20:59,347 - INFO - STARTING MOVIE CREW UPDATE
+2026-03-22 13:20:59,347 - INFO - ============================================================
+2026-03-22 13:20:59,347 - INFO - Fetching movie IDs from MotherDuck...
+2026-03-22 13:20:59,649 - INFO - [SAMPLE] Limiting from 105591 to 2 items
+2026-03-22 13:20:59,652 - INFO - Found 2 movie IDs to process.
+2026-03-22 13:20:59,652 - INFO - [DRY RUN] Would fetch crew for 2 movies
+2026-03-22 13:20:59,652 - INFO - [DRY RUN] Would record last_update for movie_crew
+2026-03-22 13:20:59,652 - INFO - ============================================================
+2026-03-22 13:20:59,652 - INFO - STARTING TV SHOW CAST UPDATE
+2026-03-22 13:20:59,652 - INFO - ============================================================
+2026-03-22 13:20:59,652 - INFO - Fetching TV show IDs from MotherDuck...
+2026-03-22 13:20:59,937 - INFO - [SAMPLE] Limiting from 169670 to 2 items
+2026-03-22 13:20:59,938 - INFO - Found 2 TV show IDs to process.
+2026-03-22 13:20:59,938 - INFO - [DRY RUN] Would fetch cast for 2 TV shows
+2026-03-22 13:20:59,938 - INFO - [DRY RUN] Would record last_update for tv_show_cast
+2026-03-22 13:20:59,938 - INFO - ============================================================
+2026-03-22 13:20:59,938 - INFO - STARTING TV SHOW CREW UPDATE
+2026-03-22 13:20:59,938 - INFO - ============================================================
+2026-03-22 13:20:59,938 - INFO - Fetching TV show IDs from MotherDuck...
+2026-03-22 13:21:00,197 - INFO - [SAMPLE] Limiting from 175119 to 2 items
+2026-03-22 13:21:00,198 - INFO - Found 2 TV show IDs to process.
+2026-03-22 13:21:00,198 - INFO - [DRY RUN] Would fetch crew for 2 TV shows
+2026-03-22 13:21:00,198 - INFO - [DRY RUN] Would record last_update for tv_show_crew
+2026-03-22 13:21:00,199 - INFO - ============================================================
+2026-03-22 13:21:00,199 - INFO - FULL UPDATE JOB COMPLETE in 0h 0m 12.04s
+2026-03-22 13:21:00,199 - INFO - ============================================================

@@ -6,6 +6,9 @@ import requests
 from config import DRY_RUN, DB_INSERT_BATCH_SIZE
 from utils import log_and_print, apply_sample
 from schema import ensure_movies_table, ensure_tv_shows_table
+from dedup import check_and_remove_duplicates
+from movies_info import MOVIE_PARTITION_COLS, MOVIE_SELECT_COLS
+from tv_shows_info import TV_SHOW_PARTITION_COLS, TV_SHOW_SELECT_COLS
 
 
 def download_tmdb_export(export_type):
@@ -127,6 +130,8 @@ def discover_new_movie_ids(con):
         elapsed = time.time() - start_time
         log_and_print(f"Inserted {inserted_count} new movie IDs in {elapsed:.2f}s")
 
+        check_and_remove_duplicates(con, 'movies', MOVIE_PARTITION_COLS, MOVIE_SELECT_COLS)
+
     except Exception as e:
         log_and_print(f"Error discovering movie IDs: {e}", level='error')
         import traceback
@@ -186,6 +191,8 @@ def discover_new_tv_show_ids(con):
 
         elapsed = time.time() - start_time
         log_and_print(f"Inserted {inserted_count} new TV show IDs in {elapsed:.2f}s")
+
+        check_and_remove_duplicates(con, 'tv_shows', TV_SHOW_PARTITION_COLS, TV_SHOW_SELECT_COLS)
 
     except Exception as e:
         log_and_print(f"Error discovering TV show IDs: {e}", level='error')
