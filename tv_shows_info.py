@@ -10,7 +10,7 @@ from config import (
 )
 from utils import (
     log_and_print, handle_rate_limit, save_checkpoint, load_checkpoint,
-    log_null_columns, log_skipped_ids, safe_str, apply_sample,
+    log_null_columns, log_skipped_ids, safe_str, apply_sample, purge_dead_ids,
 )
 from dedup import check_and_remove_duplicates
 
@@ -127,6 +127,7 @@ def update_tv_shows_info(con):
     if not all_tv_data:
         log_and_print("No TV show data to update.")
         log_skipped_ids(skipped_ids, 'tv_shows_info_skipped_ids.log')
+        purge_dead_ids(con, 'tv_shows', skipped_ids)
         return
 
     tv_df = pd.DataFrame(all_tv_data)
@@ -177,6 +178,7 @@ def update_tv_shows_info(con):
 
     save_checkpoint(processed_ids, 'tv_shows_info_checkpoint.pkl')
     log_skipped_ids(skipped_ids, 'tv_shows_info_skipped_ids.log')
+    purge_dead_ids(con, 'tv_shows', skipped_ids)
 
     check_and_remove_duplicates(con, 'tv_shows', TV_SHOW_PARTITION_COLS, TV_SHOW_SELECT_COLS)
 

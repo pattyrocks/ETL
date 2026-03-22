@@ -1,5 +1,6 @@
 import time
 import pickle
+import random
 import hashlib
 from datetime import datetime, timezone
 from config import (
@@ -74,9 +75,10 @@ def safe_str(value):
 
 
 def apply_sample(ids_list):
-    """Apply sample limit if set."""
+    """Apply sample limit if set, with random shuffle."""
     if SAMPLE_SIZE > 0 and len(ids_list) > SAMPLE_SIZE:
         log_and_print(f"[SAMPLE] Limiting from {len(ids_list)} to {SAMPLE_SIZE} items")
+        random.shuffle(ids_list)
         return ids_list[:SAMPLE_SIZE]
     return ids_list
 
@@ -84,6 +86,21 @@ def apply_sample(ids_list):
 def generate_surrogate_key(*parts):
     """Generate a surrogate key by joining parts with '-'."""
     return '-'.join(str(p) if p is not None else '' for p in parts)
+
+
+def purge_dead_ids(con, table, dead_ids):
+    """Delete rows from table where the IDs returned 404 from TMDB."""
+    if not dead_ids:
+        return
+    if DRY_RUN:
+        log_and_print(f"[DRY RUN] Would purge {len(dead_ids)} dead IDs from {table}")
+        return
+    try:
+        placeholders = ', '.join(['?'] * len(dead_ids))
+        con.execute(f"DELETE FROM {table} WHERE id IN ({placeholders})", dead_ids)
+        log_and_print(f"Purged {len(dead_ids)} dead IDs from {table}")
+    except Exception as e:
+        log_and_print(f"Failed to purge dead IDs from {table}: {e}", level='error')
 
 
 def record_last_update(con, table_name):

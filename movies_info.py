@@ -10,7 +10,7 @@ from config import (
 )
 from utils import (
     log_and_print, handle_rate_limit, save_checkpoint, load_checkpoint,
-    log_null_columns, log_skipped_ids, safe_str, apply_sample,
+    log_null_columns, log_skipped_ids, safe_str, apply_sample, purge_dead_ids,
 )
 from dedup import check_and_remove_duplicates
 
@@ -141,6 +141,7 @@ def update_movies_info(con):
     if not all_movie_data:
         log_and_print("No movie data to update.")
         log_skipped_ids(skipped_ids, 'movies_info_skipped_ids.log')
+        purge_dead_ids(con, 'movies', skipped_ids)
         return
 
     movies_df = pd.DataFrame(all_movie_data)
@@ -206,6 +207,7 @@ def update_movies_info(con):
 
     save_checkpoint(processed_ids, 'movies_info_checkpoint.pkl')
     log_skipped_ids(skipped_ids, 'movies_info_skipped_ids.log')
+    purge_dead_ids(con, 'movies', skipped_ids)
 
     check_and_remove_duplicates(con, 'movies', MOVIE_PARTITION_COLS, MOVIE_SELECT_COLS)
 
