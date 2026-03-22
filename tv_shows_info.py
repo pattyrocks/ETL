@@ -16,9 +16,9 @@ from dedup import check_and_remove_duplicates
 
 TV_SHOW_PARTITION_COLS = ['id']
 TV_SHOW_SELECT_COLS = [
-    'id', 'name', 'popularity', 'vote_average', 'vote_count',
-    'first_air_date', 'last_air_date', 'episode_run_time',
-    'in_production', 'number_of_episodes', 'number_of_seasons',
+    'id', 'name', 'episode_run_time',
+    'in_production', 'popularity', 'last_air_date',
+    'number_of_episodes', 'number_of_seasons',
     'origin_country', 'production_countries', 'status', 'type',
     'inserted_at', 'updated_at',
 ]
@@ -33,9 +33,6 @@ def fetch_tv_show_info(tv_id):
                 'id': tv_info.get('id'),
                 'name': tv_info.get('name'),
                 'popularity': tv_info.get('popularity'),
-                'vote_average': tv_info.get('vote_average'),
-                'vote_count': tv_info.get('vote_count'),
-                'first_air_date': tv_info.get('first_air_date') or None,
                 'last_air_date': tv_info.get('last_air_date') or None,
                 'episode_run_time': safe_str(tv_info.get('episode_run_time')),
                 'in_production': tv_info.get('in_production'),
@@ -134,13 +131,13 @@ def update_tv_shows_info(con):
 
     tv_df = pd.DataFrame(all_tv_data)
 
-    TV_SHOW_COLUMNS = ['id', 'name', 'popularity', 'vote_average', 'vote_count',
-        'first_air_date', 'last_air_date', 'episode_run_time',
-        'in_production', 'number_of_episodes', 'number_of_seasons',
+    TV_SHOW_COLUMNS = ['id', 'name', 'episode_run_time',
+        'in_production', 'popularity', 'last_air_date',
+        'number_of_episodes', 'number_of_seasons',
         'origin_country', 'production_countries', 'status', 'type']
     tv_df = tv_df[[c for c in TV_SHOW_COLUMNS if c in tv_df.columns]]
 
-    for date_col in ['first_air_date', 'last_air_date']:
+    for date_col in ['last_air_date']:
         if date_col in tv_df.columns:
             tv_df[date_col] = tv_df[date_col].replace('', None)
 
@@ -161,9 +158,6 @@ def update_tv_shows_info(con):
                 SET
                     name = batch_view.name,
                     popularity = batch_view.popularity,
-                    vote_average = batch_view.vote_average,
-                    vote_count = batch_view.vote_count,
-                    first_air_date = batch_view.first_air_date,
                     last_air_date = batch_view.last_air_date,
                     episode_run_time = batch_view.episode_run_time,
                     in_production = batch_view.in_production,

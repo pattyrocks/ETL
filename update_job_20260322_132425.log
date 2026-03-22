@@ -1,0 +1,124 @@
+2026-03-22 13:24:26,090 - INFO - ============================================================
+2026-03-22 13:24:26,090 - INFO - STARTING FULL UPDATE JOB
+2026-03-22 13:24:26,090 - INFO - Timestamp: 2026-03-22 13:24:26
+2026-03-22 13:24:26,090 - INFO - [SAMPLE MODE] Processing max 2 items per step
+2026-03-22 13:24:26,091 - INFO - ============================================================
+2026-03-22 13:24:29,785 - INFO - ============================================================
+2026-03-22 13:24:29,786 - INFO - DISCOVERING NEW MOVIE IDS
+2026-03-22 13:24:29,786 - INFO - ============================================================
+2026-03-22 13:24:29,923 - INFO - Fetching existing movie IDs from database...
+2026-03-22 13:24:30,961 - INFO - Found 972152 existing movie IDs
+2026-03-22 13:24:30,962 - INFO - Downloading TMDB movie IDs export...
+2026-03-22 13:24:30,962 - INFO - Trying to download: http://files.tmdb.org/p/exports/movie_ids_03_22_2026.json.gz
+2026-03-22 13:24:31,384 - INFO - Successfully downloaded: movie_ids_03_22_2026.json.gz (24.26 MB)
+2026-03-22 13:24:33,508 - INFO - Total movie IDs in TMDB: 1173316
+2026-03-22 13:24:33,536 - INFO - New movie IDs to add: 226014
+2026-03-22 13:24:33,539 - INFO - [SAMPLE] Limiting from 226014 to 2 items
+2026-03-22 13:24:33,734 - INFO - Movie ID Progress: 2/2
+2026-03-22 13:24:33,734 - INFO - Inserted 2 new movie IDs in 3.95s
+2026-03-22 13:24:33,734 - INFO - Checking for duplicates in movies...
+2026-03-22 13:24:33,889 - INFO - No duplicates found in movies.
+2026-03-22 13:24:34,223 - ERROR - Failed to record last_update for movies: Binder Error: The specified columns as conflict target are not referenced by a UNIQUE/PRIMARY KEY CONSTRAINT or INDEX
+2026-03-22 13:24:34,223 - INFO - ============================================================
+2026-03-22 13:24:34,223 - INFO - DISCOVERING NEW TV SHOW IDS
+2026-03-22 13:24:34,224 - INFO - ============================================================
+2026-03-22 13:24:34,360 - INFO - Fetching existing TV show IDs from database...
+2026-03-22 13:24:35,150 - INFO - Found 176705 existing TV show IDs
+2026-03-22 13:24:35,150 - INFO - Downloading TMDB TV series IDs export...
+2026-03-22 13:24:35,150 - INFO - Trying to download: http://files.tmdb.org/p/exports/tv_series_ids_03_22_2026.json.gz
+2026-03-22 13:24:35,274 - INFO - Successfully downloaded: tv_series_ids_03_22_2026.json.gz (4.42 MB)
+2026-03-22 13:24:35,587 - INFO - Total TV show IDs in TMDB: 217330
+2026-03-22 13:24:35,592 - INFO - New TV show IDs to add: 42962
+2026-03-22 13:24:35,592 - INFO - [SAMPLE] Limiting from 42962 to 2 items
+2026-03-22 13:24:35,756 - INFO - TV Show ID Progress: 2/2
+2026-03-22 13:24:35,756 - INFO - Inserted 2 new TV show IDs in 1.53s
+2026-03-22 13:24:35,756 - INFO - Checking for duplicates in tv_shows...
+2026-03-22 13:24:35,905 - INFO - No duplicates found in tv_shows.
+2026-03-22 13:24:36,183 - ERROR - Failed to record last_update for tv_shows: Binder Error: The specified columns as conflict target are not referenced by a UNIQUE/PRIMARY KEY CONSTRAINT or INDEX
+2026-03-22 13:24:36,184 - INFO - ============================================================
+2026-03-22 13:24:36,184 - INFO - STARTING MOVIES INFO UPDATE
+2026-03-22 13:24:36,184 - INFO - ============================================================
+2026-03-22 13:24:36,371 - INFO - [SAMPLE] Limiting from 8885 to 2 items
+2026-03-22 13:24:36,372 - INFO - Starting movie info retrieval for 2 movies...
+2026-03-22 13:24:36,831 - INFO - Movie info API retrieval complete in 0.65s
+2026-03-22 13:24:36,831 - INFO - Successfully fetched: 0, Skipped: 2
+2026-03-22 13:24:36,832 - INFO - No movie data to update.
+2026-03-22 13:24:36,833 - WARNING - Wrote 2 skipped IDs to movies_info_skipped_ids.log
+2026-03-22 13:24:37,102 - ERROR - Failed to record last_update for movies: Binder Error: The specified columns as conflict target are not referenced by a UNIQUE/PRIMARY KEY CONSTRAINT or INDEX
+2026-03-22 13:24:37,103 - INFO - ============================================================
+2026-03-22 13:24:37,103 - INFO - STARTING TV SHOWS INFO UPDATE
+2026-03-22 13:24:37,103 - INFO - ============================================================
+2026-03-22 13:24:37,275 - INFO - [SAMPLE] Limiting from 21287 to 2 items
+2026-03-22 13:24:37,276 - INFO - Starting TV show info retrieval for 2 shows...
+2026-03-22 13:24:37,755 - INFO - TV show info API retrieval complete in 0.65s
+2026-03-22 13:24:37,755 - INFO - Successfully fetched: 2, Skipped: 0
+2026-03-22 13:24:37,765 - INFO - Null column log written to tv_shows_info_null_columns.log
+2026-03-22 13:24:37,765 - INFO - Updating TV shows in database...
+2026-03-22 13:24:38,037 - ERROR - Error updating TV show batch: Binder Error: Referenced update column popularity not found in table!
+
+Did you mean: "id"
+2026-03-22 13:24:38,039 - INFO - Checking for duplicates in tv_shows...
+2026-03-22 13:24:38,186 - INFO - No duplicates found in tv_shows.
+2026-03-22 13:24:38,186 - INFO - TV shows info update complete in 1.08s
+2026-03-22 13:24:38,446 - ERROR - Failed to record last_update for tv_shows: Binder Error: The specified columns as conflict target are not referenced by a UNIQUE/PRIMARY KEY CONSTRAINT or INDEX
+2026-03-22 13:24:38,446 - INFO - ============================================================
+2026-03-22 13:24:38,446 - INFO - STARTING MOVIE CAST UPDATE
+2026-03-22 13:24:38,446 - INFO - ============================================================
+2026-03-22 13:24:38,447 - INFO - Fetching movie IDs from MotherDuck...
+2026-03-22 13:24:39,108 - INFO - [SAMPLE] Limiting from 273821 to 2 items
+2026-03-22 13:24:39,109 - INFO - Found 2 movie IDs to process.
+2026-03-22 13:24:39,110 - INFO - Starting parallel API retrieval with 15 workers...
+2026-03-22 13:24:39,531 - INFO - Finished movie cast API retrieval in 1.08s
+2026-03-22 13:24:39,531 - INFO - Total cast members fetched: 0
+2026-03-22 13:24:39,531 - INFO - No movie cast data to insert.
+2026-03-22 13:24:39,531 - INFO - Checking for duplicates in movie_cast...
+2026-03-22 13:24:41,771 - INFO - No duplicates found in movie_cast.
+2026-03-22 13:24:41,772 - WARNING - Wrote 2 skipped IDs to movie_cast_skipped_ids.log
+2026-03-22 13:24:42,081 - ERROR - Failed to record last_update for movie_cast: Binder Error: The specified columns as conflict target are not referenced by a UNIQUE/PRIMARY KEY CONSTRAINT or INDEX
+2026-03-22 13:24:42,081 - INFO - ============================================================
+2026-03-22 13:24:42,081 - INFO - STARTING MOVIE CREW UPDATE
+2026-03-22 13:24:42,081 - INFO - ============================================================
+2026-03-22 13:24:42,081 - INFO - Fetching movie IDs from MotherDuck...
+2026-03-22 13:24:43,271 - INFO - [SAMPLE] Limiting from 105593 to 2 items
+2026-03-22 13:24:43,272 - INFO - Found 2 movie IDs to process.
+2026-03-22 13:24:43,272 - INFO - Starting parallel API retrieval with 15 workers...
+2026-03-22 13:24:43,808 - INFO - Finished movie crew API retrieval in 1.73s
+2026-03-22 13:24:43,809 - INFO - Total crew members fetched: 0
+2026-03-22 13:24:43,809 - INFO - No movie crew data to insert.
+2026-03-22 13:24:43,809 - INFO - Checking for duplicates in movie_crew...
+2026-03-22 13:24:44,098 - INFO - No duplicates found in movie_crew.
+2026-03-22 13:24:44,099 - WARNING - Wrote 2 skipped IDs to movie_crew_skipped_ids.log
+2026-03-22 13:24:44,363 - ERROR - Failed to record last_update for movie_crew: Binder Error: The specified columns as conflict target are not referenced by a UNIQUE/PRIMARY KEY CONSTRAINT or INDEX
+2026-03-22 13:24:44,364 - INFO - ============================================================
+2026-03-22 13:24:44,364 - INFO - STARTING TV SHOW CAST UPDATE
+2026-03-22 13:24:44,364 - INFO - ============================================================
+2026-03-22 13:24:44,364 - INFO - Fetching TV show IDs from MotherDuck...
+2026-03-22 13:24:44,751 - INFO - [SAMPLE] Limiting from 169672 to 2 items
+2026-03-22 13:24:44,751 - INFO - Found 2 TV show IDs to process.
+2026-03-22 13:24:44,752 - INFO - Starting parallel API retrieval with 15 workers...
+2026-03-22 13:24:45,544 - INFO - Finished TV cast API retrieval in 1.18s
+2026-03-22 13:24:45,545 - INFO - Total TV cast members fetched: 14
+2026-03-22 13:24:45,548 - INFO - Null column log written to tv_cast_null_columns.log
+2026-03-22 13:24:45,548 - INFO - Inserting TV cast data into MotherDuck...
+2026-03-22 13:24:45,814 - ERROR - Error inserting TV cast batch: Binder Error: Table "tv_show_cast" does not have a column with name "also_known_as"
+2026-03-22 13:24:45,816 - INFO - Checking for duplicates in tv_show_cast...
+2026-03-22 13:24:46,003 - INFO - No duplicates found in tv_show_cast.
+2026-03-22 13:24:46,004 - INFO - TV show cast update complete in 1.64s
+2026-03-22 13:24:46,271 - ERROR - Failed to record last_update for tv_show_cast: Binder Error: The specified columns as conflict target are not referenced by a UNIQUE/PRIMARY KEY CONSTRAINT or INDEX
+2026-03-22 13:24:46,271 - INFO - ============================================================
+2026-03-22 13:24:46,271 - INFO - STARTING TV SHOW CREW UPDATE
+2026-03-22 13:24:46,272 - INFO - ============================================================
+2026-03-22 13:24:46,272 - INFO - Fetching TV show IDs from MotherDuck...
+2026-03-22 13:24:46,688 - INFO - [SAMPLE] Limiting from 175121 to 2 items
+2026-03-22 13:24:46,689 - INFO - Found 2 TV show IDs to process.
+2026-03-22 13:24:46,689 - INFO - Starting parallel API retrieval with 15 workers...
+2026-03-22 13:24:47,468 - INFO - Finished TV crew API retrieval in 1.20s
+2026-03-22 13:24:47,469 - INFO - Total TV crew members fetched: 0
+2026-03-22 13:24:47,469 - INFO - No TV crew data to insert.
+2026-03-22 13:24:47,470 - INFO - Checking for duplicates in tv_show_crew...
+2026-03-22 13:24:47,606 - INFO - No duplicates found in tv_show_crew.
+2026-03-22 13:24:47,607 - WARNING - Wrote 2 skipped IDs to tv_crew_skipped_ids.log
+2026-03-22 13:24:47,887 - ERROR - Failed to record last_update for tv_show_crew: Binder Error: The specified columns as conflict target are not referenced by a UNIQUE/PRIMARY KEY CONSTRAINT or INDEX
+2026-03-22 13:24:47,889 - INFO - ============================================================
+2026-03-22 13:24:47,889 - INFO - FULL UPDATE JOB COMPLETE in 0h 0m 21.80s
+2026-03-22 13:24:47,889 - INFO - ============================================================

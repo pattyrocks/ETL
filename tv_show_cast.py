@@ -102,7 +102,6 @@ def fetch_tv_show_cast(tv_id):
                     'roles': str(roles) if roles else None,
                     'total_episode_count': total_episode_count,
                     'cast_id': cast_id,
-                    'also_known_as': also_known_as,
                     'surrogate_key': generate_surrogate_key(tv_id, cast_member.get('id'), credit_id),
                 })
             return processed_cast_data
@@ -125,7 +124,7 @@ TV_CAST_SELECT_COLS = [
     'tv_id', 'person_id', 'name', 'credit_id', 'character', 'cast_order',
     'gender', 'profile_path', 'known_for_department', 'popularity',
     'original_name', 'roles', 'total_episode_count', 'cast_id',
-    'also_known_as', 'inserted_at', 'updated_at', 'surrogate_key'
+    'inserted_at', 'updated_at', 'surrogate_key'
 ]
 
 
@@ -203,7 +202,7 @@ def update_tv_show_cast(con):
     log_null_columns(cast_df, log_file='tv_cast_null_columns.log')
 
     log_and_print('Inserting TV cast data into MotherDuck...')
-    tv_columns = 'tv_id, person_id, name, credit_id, character, cast_order, gender, profile_path, known_for_department, popularity, original_name, roles, total_episode_count, cast_id, also_known_as, surrogate_key'
+    tv_columns = 'tv_id, person_id, name, credit_id, character, cast_order, gender, profile_path, known_for_department, popularity, original_name, roles, total_episode_count, cast_id, surrogate_key'
 
     num_batches = math.ceil(len(cast_df) / DB_INSERT_BATCH_SIZE)
     for i in range(num_batches):
