@@ -2,8 +2,6 @@ import streamlit as st
 import streamlit.components.v1 as components
 import duckdb
 import json
-import ast
-from collections import Counter
 from datetime import date
 
 st.set_page_config(
@@ -19,18 +17,6 @@ st.markdown(
     </style>""",
     unsafe_allow_html=True,
 )
-
-
-def parse_genres(s: str) -> list:
-    if not s or s in ("None", "", "[]"):
-        return []
-    try:
-        return ast.literal_eval(s)
-    except Exception:
-        try:
-            return json.loads(s)
-        except Exception:
-            return []
 
 
 @st.cache_data(ttl=3600, show_spinner="Querying MotherDuck…")
@@ -69,24 +55,17 @@ def load_data(token: str) -> dict:
             WHERE release_date IS NOT NULL
               AND YEAR(release_date) BETWEEN 1980 AND 2025
             GROUP BY yr
-            ORDER BY yr DESC
+            ORDER BY yr ASC
         """).fetchall()
 
-        genres_raw = con.execute("""
-            SELECT genres
+        budget_raw = con.execute("""
+            SELECT YEAR(release_date) AS yr, ROUND(median(budget) / 1000000, 1) AS budget_m
             FROM movies
-            WHERE genres IS NOT NULL
-              AND genres != ''
-              AND genres != '[]'
-              AND genres != 'None'
-            LIMIT 10
+            WHERE budget > 0 AND release_date IS NOT NULL
+            GROUP BY 1
+            ORDER BY 1 DESC
+            LIMIT 26
         """).fetchall()
-
-        genre_counter: Counter = Counter()
-        for (g_str,) in genres_raw:
-            for g in parse_genres(g_str):
-                if isinstance(g, dict) and g.get("name"):
-                    genre_counter[g["name"]] += 1
 
         decade_ratings = con.execute("""
             SELECT
@@ -98,7 +77,7 @@ def load_data(token: str) -> dict:
               AND vote_count >= 20
               AND YEAR(release_date) BETWEEN 1900 AND 2025
             GROUP BY decade
-            ORDER BY decade
+            ORDER BY decade DESC
         """).fetchall()
 
         return {
@@ -107,7 +86,7 @@ def load_data(token: str) -> dict:
             "golden": golden,
             "avg_runtime": int(avg_runtime_row[0]) if avg_runtime_row and avg_runtime_row[0] else 0,
             "releases": releases,
-            "top_genres": genre_counter.most_common(4),
+            "budget_raw": budget_raw,
             "decade_ratings": decade_ratings,
         }
     finally:
@@ -135,14 +114,13 @@ releases = data["releases"]
 years = [str(r[0]) for r in releases]
 movie_counts = [r[1] for r in releases]
 avg_yearly = int(sum(movie_counts) / len(movie_counts)) if movie_counts else 0
-
 peak_idx = movie_counts.index(max(movie_counts)) if movie_counts else 0
 peak_year = years[peak_idx] if years else "N/A"
 
-GENRE_COLORS = ["#4A7FD4", "#F76E6E", "#639922", "#c0c0c8"]
-top_genres = data["top_genres"]
-genre_total = sum(c for _, c in top_genres) or 1
-genre_pcts = [(name, round(c / genre_total * 100)) for name, c in top_genres]
+# Budget data — sort chronologically for bar chart
+budget_data = sorted(data["budget_raw"], key=lambda r: r[0])
+budget_years = [str(r[0]) for r in budget_data]
+budget_values = [float(r[1]) if r[1] is not None else 0.0 for r in budget_data]
 
 decade_ratings = data["decade_ratings"]
 max_rating = max((r for _, r in decade_ratings), default=10.0) or 10.0
@@ -157,11 +135,6 @@ def decade_bar_color(r: float) -> str:
     return "#4A7FD4"
 
 
-genre_legend_html = "\n".join(
-    f'<div class="leg-item"><div class="leg-sq" style="background:{GENRE_COLORS[i % 4]}"></div>{name} {pct}%</div>'
-    for i, (name, pct) in enumerate(genre_pcts)
-)
-
 decade_rows_html = "\n".join(
     f"""<div class="genre-row">
           <div class="genre-name">{d}s</div>
@@ -174,9 +147,8 @@ decade_rows_html = "\n".join(
 today_label = date.today().strftime("%b %Y")
 js_counts = json.dumps(movie_counts)
 js_years = json.dumps(years)
-js_genre_data = json.dumps([pct for _, pct in genre_pcts])
-js_genre_labels = json.dumps([name for name, _ in genre_pcts])
-js_genre_colors = json.dumps(GENRE_COLORS[: len(genre_pcts)])
+js_budget_years = json.dumps(budget_years)
+js_budget_values = json.dumps(budget_values)
 
 html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -257,8 +229,6 @@ body {{
 }}
 .card-title {{ font-size: 14px; font-weight: 500; color: #1a1a2e; margin-bottom: 3px; }}
 .card-sub {{ font-size: 11px; color: #9090a8; margin-bottom: 14px; }}
-.chart-legend {{ display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }}
-.leg-sq {{ width: 10px; height: 10px; border-radius: 3px; }}
 .genre-list {{ display: flex; flex-direction: column; gap: 11px; }}
 .genre-row {{ display: flex; align-items: center; gap: 10px; }}
 .genre-name {{ font-size: 12px; color: #6b6b88; width: 80px; flex-shrink: 0; }}
@@ -313,7 +283,7 @@ body {{
   <div class="wave-top">
     <div>
       <div class="wave-title">Releases over time</div>
-      <div class="wave-sub">Movie release trends 1828–2025 · SELECT YEAR(release_date), COUNT(*) FROM movies GROUP BY 1</div>
+      <div class="wave-sub">Movie release trends 1980–2025 · SELECT YEAR(release_date), COUNT(*) FROM movies GROUP BY 1</div>
     </div>
   </div>
   <div class="chart-wrap">
@@ -350,13 +320,10 @@ body {{
 
 <div class="bottom-row">
   <div class="card">
-    <div class="card-title">Genre distribution</div>
-    <div class="card-sub">SELECT genre, COUNT(*) FROM movies GROUP BY genre ORDER BY 2 DESC</div>
-    <div class="chart-legend">
-      {genre_legend_html}
-    </div>
-    <div style="position:relative;width:100%;height:180px;">
-      <canvas id="genreChart"></canvas>
+    <div class="card-title">Median budget by year</div>
+    <div class="card-sub">SELECT YEAR(release_date), median(budget) FROM movies WHERE budget &gt; 0 GROUP BY 1</div>
+    <div style="position:relative;width:100%;height:200px;">
+      <canvas id="budgetChart"></canvas>
     </div>
   </div>
   <div class="card">
@@ -416,24 +383,27 @@ svg.addEventListener('mouseleave',()=>{{
   document.getElementById('tip').style.left='50%';
 }});
 
-new Chart(document.getElementById('genreChart'),{{
-  type:'doughnut',
+new Chart(document.getElementById('budgetChart'),{{
+  type:'bar',
   data:{{
-    labels:{js_genre_labels},
+    labels:{js_budget_years},
     datasets:[{{
-      data:{js_genre_data},
-      backgroundColor:{js_genre_colors},
-      borderWidth:0,
-      hoverOffset:4
+      data:{js_budget_values},
+      backgroundColor:'rgba(74,127,212,0.7)',
+      borderRadius:4,
+      borderSkipped:false,
     }}]
   }},
   options:{{
     responsive:true,
     maintainAspectRatio:false,
-    cutout:'68%',
     plugins:{{
       legend:{{display:false}},
-      tooltip:{{callbacks:{{label:ctx=>ctx.label+': '+ctx.parsed+'%'}}}}
+      tooltip:{{callbacks:{{label:ctx=>'$'+ctx.parsed.y.toFixed(1)+'M median'}}}}
+    }},
+    scales:{{
+      x:{{ticks:{{font:{{size:10}},maxRotation:45}},grid:{{display:false}}}},
+      y:{{ticks:{{font:{{size:10}},callback:v=>'$'+v+'M'}},grid:{{color:'rgba(0,0,0,0.05)'}}}}
     }}
   }}
 }});
