@@ -60,17 +60,16 @@ def load_data(token: str) -> dict:
         avg_runtime_row = con.execute("""
             SELECT ROUND(AVG(runtime))
             FROM movies
-            WHERE YEAR(release_date) = 2024
-              AND runtime BETWEEN 30 AND 300
+            WHERE YEAR(release_date) = 2025
         """).fetchone()
 
         releases = con.execute("""
             SELECT YEAR(release_date) AS yr, COUNT(*) AS cnt
             FROM movies
             WHERE release_date IS NOT NULL
-              AND YEAR(release_date) BETWEEN 1980 AND 2024
+              AND YEAR(release_date) BETWEEN 1980 AND 2025
             GROUP BY yr
-            ORDER BY yr
+            ORDER BY yr DESC
         """).fetchall()
 
         genres_raw = con.execute("""
@@ -80,7 +79,7 @@ def load_data(token: str) -> dict:
               AND genres != ''
               AND genres != '[]'
               AND genres != 'None'
-            LIMIT 500000
+            LIMIT 10
         """).fetchall()
 
         genre_counter: Counter = Counter()
@@ -97,7 +96,7 @@ def load_data(token: str) -> dict:
             WHERE release_date IS NOT NULL
               AND vote_average > 0
               AND vote_count >= 20
-              AND YEAR(release_date) BETWEEN 1960 AND 2024
+              AND YEAR(release_date) BETWEEN 1900 AND 2025
             GROUP BY decade
             ORDER BY decade
         """).fetchall()
@@ -303,7 +302,7 @@ body {{
     <div class="kpi-bar"><div class="kpi-bar-fill" style="width:88%;background:#639922"></div></div>
   </div>
   <div class="kpi">
-    <div class="kpi-label">Avg runtime 2024</div>
+    <div class="kpi-label">Avg runtime 2025</div>
     <div class="kpi-value">{data["avg_runtime"]} min</div>
     <div class="kpi-change up">↑ movies between 30–300 min</div>
     <div class="kpi-bar"><div class="kpi-bar-fill" style="width:60%;background:#F76E6E"></div></div>
@@ -314,7 +313,7 @@ body {{
   <div class="wave-top">
     <div>
       <div class="wave-title">Releases over time</div>
-      <div class="wave-sub">Movie release trends 1980–2024 · SELECT YEAR(release_date), COUNT(*) FROM movies GROUP BY 1</div>
+      <div class="wave-sub">Movie release trends 1828–2025 · SELECT YEAR(release_date), COUNT(*) FROM movies GROUP BY 1</div>
     </div>
   </div>
   <div class="chart-wrap">
@@ -442,4 +441,4 @@ new Chart(document.getElementById('genreChart'),{{
 </body>
 </html>"""
 
-components.html(html, height=860, scrolling=False)
+components.html(html, height=860, scrolling=True)
