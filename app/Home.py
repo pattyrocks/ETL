@@ -59,10 +59,11 @@ def load_data(token: str) -> dict:
         """).fetchall()
 
         budget_raw = con.execute("""
-            SELECT YEAR(release_date) AS yr, ROUND(median(budget) / 1000000, 1) AS budget_m
+            SELECT YEAR(release_date) AS yr, ROUND(median(budget) / 1000, 1) AS budget_thousands
             FROM movies
-            WHERE budget > 0 AND release_date IS NOT NULL
-            GROUP BY 1
+            where budget > 100
+              and year(release_date) >= 2000 and year(release_date) <= 2026
+              and runtime > 30            GROUP BY 1
             ORDER BY 1 DESC
             LIMIT 26
         """).fetchall()
