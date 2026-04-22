@@ -16,39 +16,37 @@ st.markdown(
     """<style>
     #MainMenu, header, footer { visibility: hidden; }
     .block-container { padding: 0 !important; max-width: 100% !important; }
+    .stApp > header { display: none; }
+    .stMainBlockContainer { padding-top: 0 !important; padding-bottom: 0 !important; }
+    iframe { border: none !important; }
+    section[data-testid="stSidebar"] { display: none; }
+    div[data-testid="stAppViewBlockContainer"] { padding: 0 !important; }
     </style>""",
     unsafe_allow_html=True,
 )
 
 
-@st.cache_data(ttl=3600, show_spinner="Querying MotherDuck…")
+@st.cache_data(ttl=300, show_spinner="Querying MotherDuck…")
 def load_data(token: str) -> dict:
     con = duckdb.connect(f"md:TMDB?motherduck_token={token}", read_only=True)
     try:
-        total_movies = con.execute(
-            "SELECT COUNT(*) FROM movies WHERE title IS NOT NULL"
-        ).fetchone()[0]
-
-        total_tv = con.execute(
-            "SELECT COUNT(*) FROM tv_shows WHERE name IS NOT NULL"
-        ).fetchone()[0]
-
-        golden = con.execute("""
-            SELECT YEAR(release_date) AS yr, ROUND(AVG(vote_average), 1) AS avg_r
-            FROM movies
-            WHERE release_date IS NOT NULL
-              AND vote_count >= 50
-              AND vote_average > 0
-            GROUP BY yr
-            HAVING COUNT(*) >= 10
-            ORDER BY avg_r DESC
-            LIMIT 1
-        """).fetchone()
-
-        avg_runtime_row = con.execute("""
-            SELECT ROUND(AVG(runtime))
-            FROM movies
-            WHERE YEAR(release_date) = 2025
+        kpi_row = con.execute("""
+            SELECT 
+                (SELECT title FROM movies WHERE EXTRACT(YEAR FROM release_date) <= EXTRACT(YEAR FROM current_date()) ORDER BY release_date DESC LIMIT 1) AS last_released_movie_title,
+                (SELECT id FROM movies WHERE EXTRACT(YEAR FROM release_date) <= EXTRACT(YEAR FROM current_date()) ORDER BY release_date DESC LIMIT 1) AS last_released_movie_id,
+                (SELECT origin_country[1] FROM movies WHERE EXTRACT(YEAR FROM release_date) <= EXTRACT(YEAR FROM current_date()) ORDER BY release_date DESC LIMIT 1) AS last_released_movie_country,
+                (SELECT COUNT(*) FROM movies WHERE release_date >= CURRENT_DATE - INTERVAL '1 day') AS total_movies_released_since_yesterday,
+                (SELECT COUNT(*) FROM movies) AS total_movies_ever_released,
+                (SELECT year FROM (
+                    SELECT EXTRACT(YEAR FROM release_date) AS year,
+                           COUNT(*) AS count
+                    FROM movies 
+                    WHERE release_date is not null
+                    GROUP BY year 
+                    ORDER BY count DESC 
+                    LIMIT 1
+                )
+                ) AS year_with_highest_number_of_movie_releases
         """).fetchone()
 
         top5_all = con.execute("""
@@ -58,16 +56,18 @@ def load_data(token: str) -> dict:
               EXTRACT(YEAR FROM release_date) as year,
               rank() over (partition by year order by popularity DESC) as rank
             FROM movies
-            WHERE EXTRACT(YEAR FROM release_date) between EXTRACT(YEAR FROM current_date()) - 9 and EXTRACT(YEAR FROM current_date()) - 1
+            WHERE EXTRACT(YEAR FROM release_date) between EXTRACT(YEAR FROM current_date()) - 10 and EXTRACT(YEAR FROM current_date()) - 1
             QUALIFY rank <= 5
             ORDER BY year DESC, rank
         """).fetchall()
 
         return {
-            "total_movies": total_movies,
-            "total_tv": total_tv,
-            "golden": golden,
-            "avg_runtime": int(avg_runtime_row[0]) if avg_runtime_row and avg_runtime_row[0] else 0,
+            "last_title": kpi_row[0],
+            "last_movie_id": kpi_row[1],
+            "last_country": kpi_row[2],
+            "released_since_yesterday": kpi_row[3],
+            "total_movies": kpi_row[4],
+            "peak_year": int(kpi_row[5]) if kpi_row[5] else "N/A",
             "top5_all": top5_all,
         }
     finally:
@@ -77,17 +77,16 @@ def load_data(token: str) -> dict:
 token = st.secrets["MOTHERDUCK_TOKEN"]
 data = load_data(token)
 
-# --- derived values ---
-total = data["total_movies"] + data["total_tv"]
-golden_year = data["golden"][0] if data["golden"] else "N/A"
-golden_rating = data["golden"][1] if data["golden"] else 0.0
-
 
 def fmt_big(n: int) -> str:
+    return f"{n:,}"
+
+
+def fmt_short(n: int) -> str:
     if n >= 1_000_000:
-        return f"{n / 1_000_000:.1f}M"
+        return f"{n / 1_000_000:.2f}M"
     if n >= 1_000:
-        return f"{n / 1_000:.0f}K"
+        return f"{n / 1_000:.2f}K"
     return str(n)
 
 
@@ -96,6 +95,16 @@ def country_name(code: str) -> str:
         return 'Unknown'
     c = pycountry.countries.get(alpha_2=code)
     return c.name if c else code
+
+
+# --- derived values ---
+last_title = data["last_title"] or "N/A"
+last_movie_id = data["last_movie_id"]
+last_country_code = data["last_country"] or ""
+last_country = country_name(last_country_code)
+released_yesterday = data["released_since_yesterday"] or 0
+total_movies = data["total_movies"] or 0
+peak_year = data["peak_year"]
 
 
 # Group top5 by year — columns: title, country_code, year, rank
@@ -171,9 +180,8 @@ body {{
 .kpi-label {{ font-size: 12px; color: #9090a8; margin-bottom: 6px; }}
 .kpi-value {{ font-size: 26px; font-weight: 500; color: #1a1a2e; line-height: 1; }}
 .kpi-change {{ font-size: 11px; margin-top: 6px; }}
-.kpi-change.up {{ color: #3B6D11; }}
-.kpi-bar {{ height: 3px; background: rgba(0,0,0,0.07); border-radius: 2px; margin-top: 10px; overflow: hidden; }}
-.kpi-bar-fill {{ height: 100%; border-radius: 2px; }}
+.kpi-change.up {{ color: #4A7FD4; }}
+.kpi-bar {{ display: none; }}
 .section-header {{ margin-bottom: 14px; }}
 .section-title {{ font-size: 22px; font-weight: 600; color: #1a1a2e; }}
 .section-sub {{ font-size: 13px; color: #9090a8; margin-top: 4px; }}
@@ -196,9 +204,19 @@ body {{
 }}
 .year-card {{
   min-width: calc(25% - 11px);
-  max-height: 420px;
-  overflow-y: auto;
+  height: 420px;
+  display: flex;
+  flex-direction: column;
   flex-shrink: 0;
+  overflow: hidden;
+}}
+.year-card .card-title {{
+  flex-shrink: 0;
+  margin-bottom: 14px;
+}}
+.year-card .top5-list {{
+  flex: 1;
+  overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: rgba(0,0,0,0.12) transparent;
 }}
@@ -213,6 +231,9 @@ body {{
 .top5-bar-wrap {{ flex: 1; height: 8px; background: rgba(0,0,0,0.06); border-radius: 4px; overflow: hidden; }}
 .top5-bar {{ height: 100%; border-radius: 4px; background: rgba(74,127,212,0.55); }}
 .top5-score {{ font-size: 14px; font-weight: 500; color: #6b6b88; width: 44px; text-align: right; flex-shrink: 0; }}
+.footnote {{ text-align: center; margin-top: 28px; font-size: 12px; color: #9090a8; }}
+.footnote a {{ color: #4A7FD4; text-decoration: none; font-weight: 500; }}
+.footnote a:hover {{ text-decoration: underline; }}
 </style>
 </head>
 <body>
@@ -220,7 +241,7 @@ body {{
 <div class="top-header">
   <div>
     <div class="brand">TMDB Analytics</div>
-    <div class="brand-sub">Movie &amp; TV Intelligence &middot; {fmt_big(total)} rows &middot; {today_label}</div>
+    <div class="brand-sub">Movies &amp; TV &middot; {fmt_big(total_movies)} movies &middot; {today_label}</div>
   </div>
 </div>
 
@@ -233,22 +254,22 @@ body {{
 
 <div class="kpi-row">
   <div class="kpi">
-    <div class="kpi-label">Total titles</div>
-    <div class="kpi-value">{fmt_big(total)}</div>
-    <div class="kpi-change up">&#8593; {fmt_big(data["total_movies"])} movies + {fmt_big(data["total_tv"])} TV</div>
-    <div class="kpi-bar"><div class="kpi-bar-fill" style="width:74%;background:#4A7FD4"></div></div>
+    <div class="kpi-label">Last released movie</div>
+    <div class="kpi-value" style="font-size:18px"><a href="https://www.themoviedb.org/movie/{last_movie_id}" target="_blank" rel="noopener" style="color:#1a1a2e;text-decoration:none">{last_title}</a></div>
+    <div class="kpi-change up">{last_country}</div>
+    <div class="kpi-bar"><div class="kpi-bar-fill" style="width:100%;background:#4A7FD4"></div></div>
   </div>
   <div class="kpi">
-    <div class="kpi-label">Golden era</div>
-    <div class="kpi-value">{golden_year}</div>
-    <div class="kpi-change up">&#8593; {golden_rating} avg rating</div>
-    <div class="kpi-bar"><div class="kpi-bar-fill" style="width:88%;background:#639922"></div></div>
+    <div class="kpi-label">Released movies since yesterday</div>
+    <div class="kpi-value">{fmt_big(released_yesterday)}</div>
+    <div class="kpi-change up">of {fmt_short(total_movies)} total movies</div>
+    <div class="kpi-bar"><div class="kpi-bar-fill" style="width:60%;background:#639922"></div></div>
   </div>
   <div class="kpi">
-    <div class="kpi-label">Avg runtime 2025</div>
-    <div class="kpi-value">{data["avg_runtime"]} min</div>
-    <div class="kpi-change up">&#8593; movies between 30&#8211;300 min</div>
-    <div class="kpi-bar"><div class="kpi-bar-fill" style="width:60%;background:#F76E6E"></div></div>
+    <div class="kpi-label">Biggest year ever</div>
+    <div class="kpi-value">{peak_year}</div>
+    <div class="kpi-change up">Most movie releases</div>
+    <div class="kpi-bar"><div class="kpi-bar-fill" style="width:88%;background:#F76E6E"></div></div>
   </div>
 </div>
 
@@ -262,6 +283,10 @@ body {{
   </div>
 </div>
 
+<div class="footnote">
+  Made by <a href="https://www.linkedin.com/in/patricians" target="_blank" rel="noopener">pattyrocks</a> &#x1F469;&#x1F3FD;&#x200D;&#x1F4BB;
+</div>
+
 <script>
 function setNav(el) {{
   document.querySelectorAll('.nav-pill').forEach(p => p.classList.remove('active'));
@@ -271,4 +296,4 @@ function setNav(el) {{
 </body>
 </html>"""
 
-components.html(html, height=620, scrolling=True)
+components.html(html, height=900, scrolling=False)
