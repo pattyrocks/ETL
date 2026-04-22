@@ -2,6 +2,8 @@ import streamlit as st
 import streamlit.components.v1 as components
 import duckdb
 import json
+import pycountry
+from collections import defaultdict
 from datetime import date
 
 st.set_page_config(
@@ -49,36 +51,16 @@ def load_data(token: str) -> dict:
             WHERE YEAR(release_date) = 2025
         """).fetchone()
 
-        releases = con.execute("""
-            SELECT YEAR(release_date) AS yr, COUNT(*) AS cnt
+        top5_all = con.execute("""
+            SELECT 
+              title,
+              UNNEST(origin_country) AS country_code,
+              EXTRACT(YEAR FROM release_date) as year,
+              rank() over (partition by year order by popularity DESC) as rank
             FROM movies
-            WHERE release_date IS NOT NULL
-              AND YEAR(release_date) BETWEEN 1980 AND 2025
-            GROUP BY yr
-            ORDER BY yr ASC
-        """).fetchall()
-
-        budget_raw = con.execute("""
-            SELECT YEAR(release_date) AS yr, ROUND(median(budget) / 1000, 1) AS budget_thousands
-            FROM movies
-            where budget > 100
-              and year(release_date) >= 2000 and year(release_date) <= 2026
-              and runtime > 30            GROUP BY 1
-            ORDER BY 1 DESC
-            LIMIT 26
-        """).fetchall()
-
-        decade_ratings = con.execute("""
-            SELECT
-                (YEAR(release_date) // 10) * 10 AS decade,
-                ROUND(AVG(vote_average), 1) AS avg_r
-            FROM movies
-            WHERE release_date IS NOT NULL
-              AND vote_average > 0
-              AND vote_count >= 20
-              AND YEAR(release_date) BETWEEN 1900 AND 2025
-            GROUP BY decade
-            ORDER BY decade DESC
+            WHERE EXTRACT(YEAR FROM release_date) between EXTRACT(YEAR FROM current_date()) - 9 and EXTRACT(YEAR FROM current_date()) - 1
+            QUALIFY rank <= 5
+            ORDER BY year DESC, rank
         """).fetchall()
 
         return {
@@ -86,9 +68,7 @@ def load_data(token: str) -> dict:
             "total_tv": total_tv,
             "golden": golden,
             "avg_runtime": int(avg_runtime_row[0]) if avg_runtime_row and avg_runtime_row[0] else 0,
-            "releases": releases,
-            "budget_raw": budget_raw,
-            "decade_ratings": decade_ratings,
+            "top5_all": top5_all,
         }
     finally:
         con.close()
@@ -111,45 +91,39 @@ def fmt_big(n: int) -> str:
     return str(n)
 
 
-releases = data["releases"]
-years = [str(r[0]) for r in releases]
-movie_counts = [r[1] for r in releases]
-avg_yearly = int(sum(movie_counts) / len(movie_counts)) if movie_counts else 0
-peak_idx = movie_counts.index(max(movie_counts)) if movie_counts else 0
-peak_year = years[peak_idx] if years else "N/A"
-
-# Budget data — sort chronologically for bar chart
-budget_data = sorted(data["budget_raw"], key=lambda r: r[0])
-budget_years = [str(r[0]) for r in budget_data]
-budget_values = [float(r[1]) if r[1] is not None else 0.0 for r in budget_data]
-
-decade_ratings = data["decade_ratings"]
-max_rating = max((r for _, r in decade_ratings), default=10.0) or 10.0
+def country_name(code: str) -> str:
+    if not code:
+        return 'Unknown'
+    c = pycountry.countries.get(alpha_2=code)
+    return c.name if c else code
 
 
-def decade_bar_color(r: float) -> str:
-    ratio = r / max_rating
-    if ratio >= 0.9:
-        return "#639922"
-    if ratio <= 0.75:
-        return "#F76E6E"
-    return "#4A7FD4"
+# Group top5 by year — columns: title, country_code, year, rank
+top5_by_year = defaultdict(list)
+for title, country_code, yr, rank in data["top5_all"]:
+    top5_by_year[int(yr)].append((title, country_name(country_code), rank))
 
+sorted_years = sorted(top5_by_year.keys(), reverse=True)
 
-decade_rows_html = "\n".join(
-    f"""<div class="genre-row">
-          <div class="genre-name">{d}s</div>
-          <div class="genre-track"><div class="genre-fill" style="width:{round(r / 10 * 100)}%;background:{decade_bar_color(r)}"></div></div>
-          <div class="genre-val">{r}</div>
-        </div>"""
-    for d, r in decade_ratings
-)
+year_cards_html = ""
+for yr in sorted_years:
+    movies = top5_by_year[yr]
+    rows = "\n".join(
+        f'<div class="top5-row">'
+        f'<div class="top5-rank">{rank}</div>'
+        f'<div class="top5-info"><div class="top5-title">{title}</div>'
+        f'<div class="top5-country">{country}</div></div>'
+        f'<div class="top5-bar-wrap"><div class="top5-bar" style="width:{round((6-rank)/5*100)}%"></div></div>'
+        f'</div>'
+        for title, country, rank in movies
+    )
+    year_cards_html += (
+        f'<div class="card year-card">'
+        f'<div class="card-title">{yr}</div>'
+        f'<div class="top5-list">{rows}</div></div>'
+    )
 
 today_label = date.today().strftime("%b %Y")
-js_counts = json.dumps(movie_counts)
-js_years = json.dumps(years)
-js_budget_years = json.dumps(budget_years)
-js_budget_values = json.dumps(budget_values)
 
 html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -157,7 +131,6 @@ html = f"""<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>TMDB Analytics</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <style>
 * {{ box-sizing: border-box; margin: 0; padding: 0; }}
 body {{
@@ -169,8 +142,8 @@ body {{
 .top-header {{
   display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;
 }}
-.brand {{ font-size: 18px; font-weight: 500; color: #1a1a2e; }}
-.brand-sub {{ font-size: 11px; color: #9090a8; margin-top: 2px; }}
+.brand {{ font-size: 26px; font-weight: 600; color: #1a1a2e; }}
+.brand-sub {{ font-size: 14px; color: #9090a8; margin-top: 3px; }}
 .header-right {{ display: flex; align-items: center; gap: 10px; }}
 .date-badge {{
   font-size: 12px; color: #6b6b88; background: #F5F5FA; border-radius: 20px;
@@ -181,16 +154,16 @@ body {{
   font-size: 12px; font-weight: 500; display: flex; align-items: center; justify-content: center;
 }}
 .top-nav {{
-  display: flex; gap: 6px; background: #F5F5FA; border-radius: 20px;
-  padding: 6px; border: 0.5px solid rgba(0,0,0,0.06); margin-bottom: 22px; width: fit-content;
+  display: flex; gap: 10px; margin-bottom: 22px; width: fit-content;
 }}
 .nav-pill {{
-  padding: 8px 22px; border-radius: 14px; font-size: 13px; color: #6b6b88;
-  cursor: pointer; transition: all 0.18s; border: none; background: none;
+  padding: 10px 28px; border-radius: 24px; font-size: 14px; color: #1a1a2e;
+  font-weight: 500; cursor: pointer; transition: all 0.18s;
+  border: 1.5px solid rgba(0,0,0,0.12); background: #fff;
   white-space: nowrap; font-family: inherit;
 }}
 .nav-pill:hover {{ color: #1a1a2e; background: rgba(0,0,0,0.04); }}
-.nav-pill.active {{ background: #4A7FD4; color: #fff; font-weight: 500; }}
+.nav-pill.active {{ background: #fff; color: #1a1a2e; font-weight: 500; border-color: rgba(0,0,0,0.25); }}
 .kpi-row {{ display: grid; grid-template-columns: repeat(3,1fr); gap: 14px; margin-bottom: 18px; }}
 .kpi {{
   background: #F5F5FA; border-radius: 18px; padding: 18px 20px; border: 0.5px solid rgba(0,0,0,0.06);
@@ -201,41 +174,45 @@ body {{
 .kpi-change.up {{ color: #3B6D11; }}
 .kpi-bar {{ height: 3px; background: rgba(0,0,0,0.07); border-radius: 2px; margin-top: 10px; overflow: hidden; }}
 .kpi-bar-fill {{ height: 100%; border-radius: 2px; }}
-.wave-card {{
-  background: #F5F5FA; border-radius: 20px; padding: 24px 28px 20px;
-  border: 0.5px solid rgba(0,0,0,0.06); margin-bottom: 18px;
+.section-header {{ margin-bottom: 14px; }}
+.section-title {{ font-size: 22px; font-weight: 600; color: #1a1a2e; }}
+.section-sub {{ font-size: 13px; color: #9090a8; margin-top: 4px; }}
+.scroll-container {{
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 10px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0,0,0,0.15) transparent;
 }}
-.wave-top {{ display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px; }}
-.wave-title {{ font-size: 15px; font-weight: 500; color: #1a1a2e; }}
-.wave-sub {{ font-size: 11px; color: #9090a8; margin-top: 3px; }}
-.chart-wrap {{ position: relative; width: 100%; height: 210px; margin-top: 10px; }}
-.tip-bubble {{
-  position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
-  background: #fff; border-radius: 14px; padding: 7px 16px;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.10); text-align: center; pointer-events: none; z-index: 10;
-  transition: left 0.08s;
+.scroll-container::-webkit-scrollbar {{ height: 6px; }}
+.scroll-container::-webkit-scrollbar-track {{ background: transparent; }}
+.scroll-container::-webkit-scrollbar-thumb {{ background: rgba(0,0,0,0.15); border-radius: 3px; }}
+.scroll-track {{
+  display: flex;
+  gap: 14px;
 }}
-.tip-year {{ font-size: 13px; font-weight: 500; color: #1a1a2e; }}
-.tip-label {{ font-size: 11px; color: #9090a8; margin-top: 1px; }}
-.wave-bottom {{ display: flex; align-items: flex-end; justify-content: space-between; margin-top: 6px; }}
-.wave-legend {{ display: flex; gap: 18px; }}
-.leg-item {{ display: flex; align-items: center; gap: 7px; font-size: 12px; color: #6b6b88; }}
-.leg-dot {{ width: 10px; height: 10px; border-radius: 50%; }}
-.big-stat {{ text-align: right; }}
-.big-num {{ font-size: 44px; font-weight: 500; color: #1a1a2e; line-height: 1; letter-spacing: -1px; }}
-.big-label {{ font-size: 11px; color: #9090a8; margin-top: 2px; }}
-.bottom-row {{ display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }}
 .card {{
   background: #F5F5FA; border-radius: 20px; padding: 22px 24px; border: 0.5px solid rgba(0,0,0,0.06);
 }}
+.year-card {{
+  min-width: calc(25% - 11px);
+  max-height: 420px;
+  overflow-y: auto;
+  flex-shrink: 0;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0,0,0,0.12) transparent;
+}}
 .card-title {{ font-size: 14px; font-weight: 500; color: #1a1a2e; margin-bottom: 3px; }}
-.card-sub {{ font-size: 11px; color: #9090a8; margin-bottom: 14px; }}
-.genre-list {{ display: flex; flex-direction: column; gap: 11px; }}
-.genre-row {{ display: flex; align-items: center; gap: 10px; }}
-.genre-name {{ font-size: 12px; color: #6b6b88; width: 80px; flex-shrink: 0; }}
-.genre-track {{ flex: 1; height: 6px; background: rgba(0,0,0,0.07); border-radius: 3px; overflow: hidden; }}
-.genre-fill {{ height: 100%; border-radius: 3px; }}
-.genre-val {{ font-size: 11px; font-weight: 500; color: #1a1a2e; width: 32px; text-align: right; }}
+.card-sub {{ font-size: 11px; color: #9090a8; margin-bottom: 14px; font-family: 'SF Mono', SFMono-Regular, Menlo, monospace; letter-spacing: 0.3px; }}
+.top5-list {{ display: flex; flex-direction: column; gap: 20px; }}
+.top5-row {{ display: flex; align-items: center; gap: 14px; }}
+.top5-rank {{ font-size: 28px; font-weight: 300; color: #c0c0c8; width: 32px; text-align: center; flex-shrink: 0; }}
+.top5-info {{ width: 200px; flex-shrink: 0; }}
+.top5-title {{ font-size: 15px; font-weight: 600; color: #1a1a2e; line-height: 1.3; }}
+.top5-country {{ font-size: 12px; color: #9090a8; margin-top: 2px; }}
+.top5-bar-wrap {{ flex: 1; height: 8px; background: rgba(0,0,0,0.06); border-radius: 4px; overflow: hidden; }}
+.top5-bar {{ height: 100%; border-radius: 4px; background: rgba(74,127,212,0.55); }}
+.top5-score {{ font-size: 14px; font-weight: 500; color: #6b6b88; width: 44px; text-align: right; flex-shrink: 0; }}
 </style>
 </head>
 <body>
@@ -243,96 +220,45 @@ body {{
 <div class="top-header">
   <div>
     <div class="brand">TMDB Analytics</div>
-    <div class="brand-sub">Movie &amp; TV Intelligence · {fmt_big(data["total_movies"])} movies · {fmt_big(data["total_tv"])} TV shows</div>
-  </div>
-  <div class="header-right">
-    <div class="date-badge">{today_label}</div>
-    <div class="avatar">PN</div>
+    <div class="brand-sub">Movie &amp; TV Intelligence &middot; {fmt_big(total)} rows &middot; {today_label}</div>
   </div>
 </div>
 
 <div class="top-nav">
   <button class="nav-pill active" onclick="setNav(this)">Overview</button>
-  <button class="nav-pill" onclick="setNav(this)">Trends</button>
-  <button class="nav-pill" onclick="setNav(this)">Genres</button>
-  <button class="nav-pill" onclick="setNav(this)">Ratings</button>
-  <button class="nav-pill" onclick="setNav(this)">Decades</button>
+  <button class="nav-pill" onclick="setNav(this)">Titles</button>
+  <button class="nav-pill" onclick="setNav(this)">Cast</button>
+  <button class="nav-pill" onclick="setNav(this)">Production</button>
 </div>
 
 <div class="kpi-row">
   <div class="kpi">
     <div class="kpi-label">Total titles</div>
     <div class="kpi-value">{fmt_big(total)}</div>
-    <div class="kpi-change up">↑ {fmt_big(data["total_movies"])} movies + {fmt_big(data["total_tv"])} TV</div>
+    <div class="kpi-change up">&#8593; {fmt_big(data["total_movies"])} movies + {fmt_big(data["total_tv"])} TV</div>
     <div class="kpi-bar"><div class="kpi-bar-fill" style="width:74%;background:#4A7FD4"></div></div>
   </div>
   <div class="kpi">
     <div class="kpi-label">Golden era</div>
     <div class="kpi-value">{golden_year}</div>
-    <div class="kpi-change up">↑ {golden_rating} avg rating</div>
+    <div class="kpi-change up">&#8593; {golden_rating} avg rating</div>
     <div class="kpi-bar"><div class="kpi-bar-fill" style="width:88%;background:#639922"></div></div>
   </div>
   <div class="kpi">
     <div class="kpi-label">Avg runtime 2025</div>
     <div class="kpi-value">{data["avg_runtime"]} min</div>
-    <div class="kpi-change up">↑ movies between 30–300 min</div>
+    <div class="kpi-change up">&#8593; movies between 30&#8211;300 min</div>
     <div class="kpi-bar"><div class="kpi-bar-fill" style="width:60%;background:#F76E6E"></div></div>
   </div>
 </div>
 
-<div class="wave-card">
-  <div class="wave-top">
-    <div>
-      <div class="wave-title">Releases over time</div>
-      <div class="wave-sub">Movie release trends 1980–2025 · SELECT YEAR(release_date), COUNT(*) FROM movies GROUP BY 1</div>
-    </div>
-  </div>
-  <div class="chart-wrap">
-    <div class="tip-bubble" id="tip">
-      <div class="tip-year" id="tip-year">{peak_year}</div>
-      <div class="tip-label" id="tip-label">Peak releases</div>
-    </div>
-    <svg id="waveSvg" width="100%" height="100%" viewBox="0 0 800 210" preserveAspectRatio="none" style="display:block;">
-      <defs>
-        <linearGradient id="rg" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#F76E6E" stop-opacity="0.15"/>
-          <stop offset="100%" stop-color="#F76E6E" stop-opacity="0"/>
-        </linearGradient>
-        <pattern id="dots" x="0" y="0" width="8" height="8" patternUnits="userSpaceOnUse">
-          <circle cx="4" cy="4" r="0.8" fill="#c0c0d0" opacity="0.45"/>
-        </pattern>
-      </defs>
-      <rect width="800" height="210" fill="url(#dots)"/>
-      <path id="redArea" fill="url(#rg)"/>
-      <path id="redLine" fill="none" stroke="#F76E6E" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-      <circle id="hoverDot" r="5" fill="#fff" stroke="#F76E6E" stroke-width="2" opacity="0"/>
-    </svg>
-  </div>
-  <div class="wave-bottom">
-    <div class="wave-legend">
-      <div class="leg-item"><div class="leg-dot" style="background:#F76E6E"></div>Movies</div>
-    </div>
-    <div class="big-stat">
-      <div class="big-num">{fmt_big(avg_yearly)}</div>
-      <div class="big-label">Avg. yearly releases</div>
-    </div>
-  </div>
+<div class="section-header">
+  <div class="section-title">Last 10 years Top 5</div>
+  <div class="section-sub">Ranked by TMDB popularity score</div>
 </div>
-
-<div class="bottom-row">
-  <div class="card">
-    <div class="card-title">Median budget by year</div>
-    <div class="card-sub">SELECT YEAR(release_date), median(budget) FROM movies WHERE budget &gt; 0 GROUP BY 1</div>
-    <div style="position:relative;width:100%;height:200px;">
-      <canvas id="budgetChart"></canvas>
-    </div>
-  </div>
-  <div class="card">
-    <div class="card-title">Avg rating by decade</div>
-    <div class="card-sub">SELECT decade, AVG(vote_average) FROM movies GROUP BY decade ORDER BY 1</div>
-    <div class="genre-list">
-      {decade_rows_html}
-    </div>
+<div class="scroll-container">
+  <div class="scroll-track">
+    {year_cards_html}
   </div>
 </div>
 
@@ -341,75 +267,8 @@ function setNav(el) {{
   document.querySelectorAll('.nav-pill').forEach(p => p.classList.remove('active'));
   el.classList.add('active');
 }}
-
-const moviesData = {js_counts};
-const years = {js_years};
-const W=800,H=210,PL=20,PR=20,PT=42,PB=16;
-const n=moviesData.length;
-const mx=Math.max(...moviesData)*1.08;
-const xs=years.map((_,i)=>PL+i/(n-1)*(W-PL-PR));
-function norm(arr){{return arr.map(v=>PT+(1-v/mx)*(H-PT-PB));}}
-const rYs=norm(moviesData);
-function smooth(xs,ys){{
-  let d=`M ${{xs[0]}} ${{ys[0]}}`;
-  for(let i=0;i<xs.length-1;i++){{const cx=(xs[i]+xs[i+1])/2;d+=` C ${{cx}} ${{ys[i]}}, ${{cx}} ${{ys[i+1]}}, ${{xs[i+1]}} ${{ys[i+1]}}`;}}
-  return d;
-}}
-const rP=smooth(xs,rYs);
-document.getElementById('redLine').setAttribute('d',rP);
-document.getElementById('redArea').setAttribute('d',rP+` L ${{xs[n-1]}} ${{H}} L ${{xs[0]}} ${{H}} Z`);
-
-const pi=moviesData.indexOf(Math.max(...moviesData));
-const dot=document.getElementById('hoverDot');
-dot.setAttribute('cx',xs[pi]);dot.setAttribute('cy',rYs[pi]);dot.setAttribute('opacity','1');
-document.getElementById('tip-year').textContent=years[pi];
-document.getElementById('tip-label').textContent=moviesData[pi].toLocaleString()+' movies released';
-
-const svg=document.getElementById('waveSvg');
-svg.addEventListener('mousemove',e=>{{
-  const r=svg.getBoundingClientRect();
-  const mx2=(e.clientX-r.left)*(W/r.width);
-  let ci=0,md=Infinity;
-  xs.forEach((x,i)=>{{const d=Math.abs(x-mx2);if(d<md){{md=d;ci=i;}}}});
-  dot.setAttribute('cx',xs[ci]);dot.setAttribute('cy',rYs[ci]);dot.setAttribute('opacity','1');
-  document.getElementById('tip-year').textContent=years[ci];
-  document.getElementById('tip-label').textContent=moviesData[ci].toLocaleString()+' movies';
-  const tip=document.getElementById('tip');
-  tip.style.left=Math.min(Math.max(xs[ci]/W*100,15),85)+'%';
-}});
-svg.addEventListener('mouseleave',()=>{{
-  dot.setAttribute('cx',xs[pi]);dot.setAttribute('cy',rYs[pi]);
-  document.getElementById('tip-year').textContent=years[pi];
-  document.getElementById('tip-label').textContent=moviesData[pi].toLocaleString()+' movies released';
-  document.getElementById('tip').style.left='50%';
-}});
-
-new Chart(document.getElementById('budgetChart'),{{
-  type:'bar',
-  data:{{
-    labels:{js_budget_years},
-    datasets:[{{
-      data:{js_budget_values},
-      backgroundColor:'rgba(74,127,212,0.7)',
-      borderRadius:4,
-      borderSkipped:false,
-    }}]
-  }},
-  options:{{
-    responsive:true,
-    maintainAspectRatio:false,
-    plugins:{{
-      legend:{{display:false}},
-      tooltip:{{callbacks:{{label:ctx=>'$'+ctx.parsed.y.toFixed(1)+'M median'}}}}
-    }},
-    scales:{{
-      x:{{ticks:{{font:{{size:10}},maxRotation:45}},grid:{{display:false}}}},
-      y:{{ticks:{{font:{{size:10}},callback:v=>'$'+v+'M'}},grid:{{color:'rgba(0,0,0,0.05)'}}}}
-    }}
-  }}
-}});
 </script>
 </body>
 </html>"""
 
-components.html(html, height=860, scrolling=True)
+components.html(html, height=620, scrolling=True)
