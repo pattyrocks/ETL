@@ -93,7 +93,7 @@ def fmt_short(n: int) -> str:
 
 def country_name(code: str) -> str:
     if not code:
-        return 'Unknown'
+        return ''
     c = pycountry.countries.get(alpha_2=code)
     return c.name if c else code
 
@@ -118,15 +118,17 @@ sorted_years = sorted(top5_by_year.keys(), reverse=True)
 year_cards_html = ""
 for yr in sorted_years:
     movies = top5_by_year[yr]
-    rows = "\n".join(
-        f'<div class="top5-row">'
-        f'<div class="top5-rank">{rank}</div>'
-        f'<div class="top5-info"><div class="top5-title"><a href="https://www.themoviedb.org/movie/{movie_id}" target="_blank" rel="noopener">{title}</a></div>'
-        f'<div class="top5-country">{country}</div></div>'
-        f'<div class="top5-bar-wrap"><div class="top5-bar" style="width:{round((6-rank)/5*100)}%"></div></div>'
-        f'</div>'
-        for title, country, rank, movie_id in movies
-    )
+    rows = ""
+    for title, country, rank, movie_id in movies:
+        country_div = f'<div class="top5-country">{country}</div>' if country else ''
+        rows += (
+            f'<div class="top5-row">'
+            f'<div class="top5-rank">{rank}</div>'
+            f'<div class="top5-info"><div class="top5-title"><a href="https://www.themoviedb.org/movie/{movie_id}" target="_blank" rel="noopener">{title}</a></div>'
+            f'{country_div}</div>'
+            f'<div class="top5-bar-wrap"><div class="top5-bar" style="width:{round((6-rank)/5*100)}%"></div></div>'
+            f'</div>'
+        )
     year_cards_html += (
         f'<div class="card year-card">'
         f'<div class="card-title">{yr}</div>'
