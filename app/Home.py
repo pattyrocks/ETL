@@ -32,9 +32,9 @@ def load_data(token: str) -> dict:
     try:
         kpi_row = con.execute("""
             SELECT 
-                (SELECT title FROM movies WHERE EXTRACT(YEAR FROM release_date) <= EXTRACT(YEAR FROM current_date()) ORDER BY release_date DESC LIMIT 1) AS last_released_movie_title,
-                (SELECT id FROM movies WHERE EXTRACT(YEAR FROM release_date) <= EXTRACT(YEAR FROM current_date()) ORDER BY release_date DESC LIMIT 1) AS last_released_movie_id,
-                (SELECT origin_country[1] FROM movies WHERE EXTRACT(YEAR FROM release_date) <= EXTRACT(YEAR FROM current_date()) ORDER BY release_date DESC LIMIT 1) AS last_released_movie_country,
+                (SELECT title FROM movies WHERE EXTRACT(YEAR FROM release_date) <= EXTRACT(YEAR FROM current_date()) AND adult = FALSE ORDER BY release_date DESC LIMIT 1) AS last_released_movie_title,
+                (SELECT id FROM movies WHERE EXTRACT(YEAR FROM release_date) <= EXTRACT(YEAR FROM current_date()) AND adult = FALSE ORDER BY release_date DESC LIMIT 1) AS last_released_movie_id,
+                (SELECT origin_country[1] FROM movies WHERE EXTRACT(YEAR FROM release_date) <= EXTRACT(YEAR FROM current_date()) AND adult = FALSE ORDER BY release_date DESC LIMIT 1) AS last_released_movie_country,
                 (SELECT COUNT(*) FROM movies WHERE release_date >= CURRENT_DATE - INTERVAL '1 day') AS total_movies_released_since_yesterday,
                 (SELECT COUNT(*) FROM movies) AS total_movies_ever_released,
                 (SELECT year FROM (
@@ -54,9 +54,10 @@ def load_data(token: str) -> dict:
               title,
               UNNEST(origin_country) AS country_code,
               EXTRACT(YEAR FROM release_date) as year,
-              rank() over (partition by year order by popularity DESC) as rank
+              rank() over (partition by year order by popularity DESC) as rank,
+              id
             FROM movies
-            WHERE EXTRACT(YEAR FROM release_date) between EXTRACT(YEAR FROM current_date()) - 10 and EXTRACT(YEAR FROM current_date()) - 1
+            WHERE adult = FALSE AND EXTRACT(YEAR FROM release_date) between EXTRACT(YEAR FROM current_date()) - 10 and EXTRACT(YEAR FROM current_date()) - 1
             QUALIFY rank <= 5
             ORDER BY year DESC, rank
         """).fetchall()
@@ -107,10 +108,10 @@ total_movies = data["total_movies"] or 0
 peak_year = data["peak_year"]
 
 
-# Group top5 by year — columns: title, country_code, year, rank
+# Group top5 by year — columns: title, country_code, year, rank, id
 top5_by_year = defaultdict(list)
-for title, country_code, yr, rank in data["top5_all"]:
-    top5_by_year[int(yr)].append((title, country_name(country_code), rank))
+for title, country_code, yr, rank, movie_id in data["top5_all"]:
+    top5_by_year[int(yr)].append((title, country_name(country_code), rank, movie_id))
 
 sorted_years = sorted(top5_by_year.keys(), reverse=True)
 
@@ -120,11 +121,11 @@ for yr in sorted_years:
     rows = "\n".join(
         f'<div class="top5-row">'
         f'<div class="top5-rank">{rank}</div>'
-        f'<div class="top5-info"><div class="top5-title">{title}</div>'
+        f'<div class="top5-info"><div class="top5-title"><a href="https://www.themoviedb.org/movie/{movie_id}" target="_blank" rel="noopener">{title}</a></div>'
         f'<div class="top5-country">{country}</div></div>'
         f'<div class="top5-bar-wrap"><div class="top5-bar" style="width:{round((6-rank)/5*100)}%"></div></div>'
         f'</div>'
-        for title, country, rank in movies
+        for title, country, rank, movie_id in movies
     )
     year_cards_html += (
         f'<div class="card year-card">'
@@ -179,6 +180,8 @@ body {{
 }}
 .kpi-label {{ font-size: 12px; color: #9090a8; margin-bottom: 6px; }}
 .kpi-value {{ font-size: 26px; font-weight: 500; color: #1a1a2e; line-height: 1; }}
+.kpi-value a {{ color: #1a1a2e; text-decoration: none; }}
+.kpi-value a:hover {{ color: #4A7FD4; }}
 .kpi-change {{ font-size: 11px; margin-top: 6px; }}
 .kpi-change.up {{ color: #4A7FD4; }}
 .kpi-bar {{ display: none; }}
@@ -227,6 +230,8 @@ body {{
 .top5-rank {{ font-size: 28px; font-weight: 300; color: #c0c0c8; width: 32px; text-align: center; flex-shrink: 0; }}
 .top5-info {{ width: 200px; flex-shrink: 0; }}
 .top5-title {{ font-size: 15px; font-weight: 600; color: #1a1a2e; line-height: 1.3; }}
+.top5-title a {{ color: #1a1a2e; text-decoration: none; }}
+.top5-title a:hover {{ color: #4A7FD4; }}
 .top5-country {{ font-size: 12px; color: #9090a8; margin-top: 2px; }}
 .top5-bar-wrap {{ flex: 1; height: 8px; background: rgba(0,0,0,0.06); border-radius: 4px; overflow: hidden; }}
 .top5-bar {{ height: 100%; border-radius: 4px; background: rgba(74,127,212,0.55); }}
@@ -255,7 +260,7 @@ body {{
 <div class="kpi-row">
   <div class="kpi">
     <div class="kpi-label">Last released movie</div>
-    <div class="kpi-value" style="font-size:18px"><a href="https://www.themoviedb.org/movie/{last_movie_id}" target="_blank" rel="noopener" style="color:#1a1a2e;text-decoration:none">{last_title}</a></div>
+    <div class="kpi-value" style="font-size:18px"><a href="https://www.themoviedb.org/movie/{last_movie_id}" target="_blank" rel="noopener">{last_title}</a></div>
     <div class="kpi-change up">{last_country}</div>
     <div class="kpi-bar"><div class="kpi-bar-fill" style="width:100%;background:#4A7FD4"></div></div>
   </div>
