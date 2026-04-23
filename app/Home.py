@@ -57,7 +57,7 @@ def load_data(token: str) -> dict:
               ROW_NUMBER() over (partition by year order by popularity DESC) as rank,
               id
             FROM movies
-            WHERE adult = FALSE AND EXTRACT(YEAR FROM release_date) between EXTRACT(YEAR FROM current_date()) - 10 and EXTRACT(YEAR FROM current_date()) - 1
+            WHERE id <> 1040159 AND adult = FALSE AND EXTRACT(YEAR FROM release_date) between EXTRACT(YEAR FROM current_date()) - 10 and EXTRACT(YEAR FROM current_date()) - 1
             QUALIFY rank <= 5
             ORDER BY year DESC, rank
         """).fetchall()
