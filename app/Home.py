@@ -32,9 +32,9 @@ def load_data(token: str) -> dict:
     try:
         kpi_row = con.execute("""
             SELECT 
-                (SELECT title FROM movies WHERE EXTRACT(YEAR FROM release_date) <= EXTRACT(YEAR FROM current_date()) AND adult = FALSE ORDER BY release_date DESC LIMIT 1) AS last_released_movie_title,
-                (SELECT id FROM movies WHERE EXTRACT(YEAR FROM release_date) <= EXTRACT(YEAR FROM current_date()) AND adult = FALSE ORDER BY release_date DESC LIMIT 1) AS last_released_movie_id,
-                (SELECT origin_country[1] FROM movies WHERE EXTRACT(YEAR FROM release_date) <= EXTRACT(YEAR FROM current_date()) AND adult = FALSE ORDER BY release_date DESC LIMIT 1) AS last_released_movie_country,
+                (SELECT title FROM movies WHERE EXTRACT(YEAR FROM release_date) <= EXTRACT(YEAR FROM current_date()) AND adult = FALSE ORDER BY release_date DESC, id DESC LIMIT 1) AS last_released_movie_title,
+                (SELECT id FROM movies WHERE EXTRACT(YEAR FROM release_date) <= EXTRACT(YEAR FROM current_date()) AND adult = FALSE ORDER BY release_date DESC, id DESC LIMIT 1) AS last_released_movie_id,
+                (SELECT origin_country[1] FROM movies WHERE EXTRACT(YEAR FROM release_date) <= EXTRACT(YEAR FROM current_date()) AND adult = FALSE ORDER BY release_date DESC, id DESC LIMIT 1) AS last_released_movie_country,
                 (SELECT COUNT(*) FROM movies WHERE release_date >= CURRENT_DATE - INTERVAL '1 day') AS total_movies_released_since_yesterday,
                 (SELECT COUNT(*) FROM movies) AS total_movies_ever_released,
                 (SELECT year FROM (
