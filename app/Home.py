@@ -52,7 +52,7 @@ def load_data(token: str) -> dict:
         top5_all = con.execute("""
             SELECT 
               title,
-              UNNEST(origin_country) AS country_code,
+              origin_country[1] AS country_code,
               EXTRACT(YEAR FROM release_date) as year,
               ROW_NUMBER() over (partition by year order by popularity DESC) as rank,
               id
