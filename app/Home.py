@@ -54,7 +54,7 @@ def load_data(token: str) -> dict:
               title,
               UNNEST(origin_country) AS country_code,
               EXTRACT(YEAR FROM release_date) as year,
-              rank() over (partition by year order by popularity DESC) as rank,
+              ROW_NUMBER() over (partition by year order by popularity DESC) as rank,
               id
             FROM movies
             WHERE adult = FALSE AND EXTRACT(YEAR FROM release_date) between EXTRACT(YEAR FROM current_date()) - 10 and EXTRACT(YEAR FROM current_date()) - 1
