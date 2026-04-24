@@ -126,7 +126,6 @@ for yr in sorted_years:
             f'<div class="top5-rank">{rank}</div>'
             f'<div class="top5-info"><div class="top5-title"><a href="https://www.themoviedb.org/movie/{movie_id}" target="_blank" rel="noopener">{title}</a></div>'
             f'{country_div}</div>'
-            f'<div class="top5-bar-wrap"><div class="top5-bar" style="width:{round((6-rank)/5*100)}%"></div></div>'
             f'</div>'
         )
     year_cards_html += (
@@ -208,7 +207,8 @@ body {{
   background: #F5F5FA; border-radius: 20px; padding: 22px 24px; border: 0.5px solid rgba(0,0,0,0.06);
 }}
 .year-card {{
-  min-width: calc(25% - 11px);
+  min-width: 260px;
+  width: calc(25% - 11px);
   height: 420px;
   display: flex;
   flex-direction: column;
