@@ -169,12 +169,15 @@ def fmt_edge(v):
     return f'{v:.0f}' if v >= 10 else f'{v:.1f}'
 
 pop_labels = [f'{fmt_edge(quantile_edges[i])}-{fmt_edge(quantile_edges[i+1])}' if quantile_edges[i+1] != float('inf') else f'{fmt_edge(quantile_edges[i])}+' for i in range(n_bins)]
-vote_labels = [str(i) for i in range(1, 11)]
+
+votes = sorted([v for p, v, b, r in data["heatmap"]])
+vote_edges = [votes[int(len(votes) * i / n_bins)] for i in range(n_bins)] + [float('inf')]
+vote_labels = [f'{vote_edges[i]:.1f}-{vote_edges[i+1]:.1f}' if vote_edges[i+1] != float('inf') else f'{vote_edges[i]:.1f}+' for i in range(n_bins)]
 
 hm_acc = {}
 for pop, vote, budget, revenue in data["heatmap"]:
     pi = next((i for i in range(len(quantile_edges) - 1) if quantile_edges[i] <= pop < quantile_edges[i + 1]), n_bins - 1)
-    vi = max(0, min(int(round(vote)) - 1, 9))
+    vi = next((i for i in range(len(vote_edges) - 1) if vote_edges[i] <= vote < vote_edges[i + 1]), n_bins - 1)
     key = (vi, pi)
     if key not in hm_acc:
         hm_acc[key] = [0, 0]
@@ -224,11 +227,11 @@ for bi in range(len(budget_labels)):
 
 heatmap2_json = json.dumps({"z": heatmap2_z, "x": pop_labels, "y": budget_labels})
 
-# --- heatmap 3: revenue heatmap (vote_average Y, popularity X, log10(revenue) color) ---
+# --- heatmap 3: revenue heatmap (quantile vote_average Y, popularity X, log10(revenue) color) ---
 hm3_acc = {}
 for pop, vote, budget, revenue in data["heatmap"]:
     pi = next((i for i in range(len(quantile_edges) - 1) if quantile_edges[i] <= pop < quantile_edges[i + 1]), n_bins - 1)
-    vi = max(0, min(int(round(vote)) - 1, 9))
+    vi = next((i for i in range(len(vote_edges) - 1) if vote_edges[i] <= vote < vote_edges[i + 1]), n_bins - 1)
     key = (vi, pi)
     if key not in hm3_acc:
         hm3_acc[key] = [0, 0]
