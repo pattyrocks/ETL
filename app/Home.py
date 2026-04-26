@@ -5,6 +5,7 @@ import json
 import pycountry
 from collections import defaultdict
 from datetime import date
+import math
 
 st.set_page_config(
     page_title="TMDB Analytics",
@@ -42,6 +43,7 @@ def load_data(token: str) -> dict:
                            COUNT(*) AS count
                     FROM movies 
                     WHERE release_date is not null
+                      AND adult = FALSE
                     GROUP BY year 
                     ORDER BY count DESC 
                     LIMIT 1
@@ -62,6 +64,26 @@ def load_data(token: str) -> dict:
             ORDER BY year DESC, rank
         """).fetchall()
 
+        heatmap_raw = con.execute("""
+            select
+              popularity, vote_average, budget
+            from movies
+            where budget > 0 and popularity > 0 and vote_average > 0 and vote_count > 0
+            and adult = false and EXTRACT(YEAR FROM release_date) <= EXTRACT(YEAR FROM current_date())
+            and budget between
+              (select percentile_cont(0.01) within group (order by budget) from movies where budget > 0 and adult = false)
+              and (select percentile_cont(0.99) within group (order by budget) from movies where budget > 0 and adult = false)
+            and popularity between
+              (select percentile_cont(0.01) within group (order by popularity) from movies where popularity > 0 and adult = false)
+              and (select percentile_cont(0.99) within group (order by popularity) from movies where popularity > 0 and adult = false)
+            and vote_average between
+              (select percentile_cont(0.01) within group (order by vote_average) from movies where vote_average > 0 and adult = false)
+              and (select percentile_cont(0.99) within group (order by vote_average) from movies where vote_average > 0 and adult = false)
+            and vote_count between
+              (select percentile_cont(0.01) within group (order by vote_count) from movies where vote_count > 0 and adult = false)
+              and (select percentile_cont(0.99) within group (order by vote_count) from movies where vote_count > 0 and adult = false)
+        """).fetchall()
+
         return {
             "last_title": kpi_row[0],
             "last_movie_id": kpi_row[1],
@@ -70,6 +92,7 @@ def load_data(token: str) -> dict:
             "total_movies": kpi_row[4],
             "peak_year": int(kpi_row[5]) if kpi_row[5] else "N/A",
             "top5_all": top5_all,
+            "heatmap": heatmap_raw,
         }
     finally:
         con.close()
@@ -133,6 +156,70 @@ for yr in sorted_years:
         f'<div class="card-title">{yr}</div>'
         f'<div class="top5-list">{rows}</div></div>'
     )
+
+# --- heatmap binning (quantile-based) ---
+pops = sorted([p for p, v, b in data["heatmap"]])
+n_bins = 8
+quantile_edges = [pops[int(len(pops) * i / n_bins)] for i in range(n_bins)] + [float('inf')]
+
+def fmt_edge(v):
+    return f'{v:.0f}' if v >= 10 else f'{v:.1f}'
+
+pop_labels = [f'{fmt_edge(quantile_edges[i])}-{fmt_edge(quantile_edges[i+1])}' if quantile_edges[i+1] != float('inf') else f'{fmt_edge(quantile_edges[i])}+' for i in range(n_bins)]
+vote_labels = [str(i) for i in range(1, 11)]
+
+hm_acc = {}
+for pop, vote, budget in data["heatmap"]:
+    pi = next((i for i in range(len(quantile_edges) - 1) if quantile_edges[i] <= pop < quantile_edges[i + 1]), n_bins - 1)
+    vi = max(0, min(int(round(vote)) - 1, 9))
+    key = (vi, pi)
+    if key not in hm_acc:
+        hm_acc[key] = [0, 0]
+    hm_acc[key][0] += math.log10(budget) if budget > 0 else 0
+    hm_acc[key][1] += 1
+
+heatmap_z = []
+for vi in range(len(vote_labels)):
+    row = []
+    for pi in range(len(pop_labels)):
+        s = hm_acc.get((vi, pi))
+        row.append(round(s[0] / s[1], 2) if s else None)
+    heatmap_z.append(row)
+
+heatmap_json = json.dumps({"z": heatmap_z, "x": pop_labels, "y": vote_labels})
+
+# --- heatmap 2: vote_average as color, budget on Y, popularity on X ---
+budgets = sorted([b for p, v, b in data["heatmap"]])
+budget_edges = [budgets[int(len(budgets) * i / n_bins)] for i in range(n_bins)] + [float('inf')]
+
+def fmt_budget_edge(v):
+    if v >= 1_000_000:
+        return f'${v/1_000_000:.0f}M'
+    if v >= 1_000:
+        return f'${v/1_000:.0f}K'
+    return f'${v:.0f}'
+
+budget_labels = [f'{fmt_budget_edge(budget_edges[i])}-{fmt_budget_edge(budget_edges[i+1])}' if budget_edges[i+1] != float('inf') else f'{fmt_budget_edge(budget_edges[i])}+' for i in range(n_bins)]
+
+hm2_acc = {}
+for pop, vote, budget in data["heatmap"]:
+    pi = next((i for i in range(len(quantile_edges) - 1) if quantile_edges[i] <= pop < quantile_edges[i + 1]), n_bins - 1)
+    bi = next((i for i in range(len(budget_edges) - 1) if budget_edges[i] <= budget < budget_edges[i + 1]), n_bins - 1)
+    key = (bi, pi)
+    if key not in hm2_acc:
+        hm2_acc[key] = [0, 0]
+    hm2_acc[key][0] += vote
+    hm2_acc[key][1] += 1
+
+heatmap2_z = []
+for bi in range(len(budget_labels)):
+    row = []
+    for pi in range(len(pop_labels)):
+        s = hm2_acc.get((bi, pi))
+        row.append(round(s[0] / s[1], 1) if s else None)
+    heatmap2_z.append(row)
+
+heatmap2_json = json.dumps({"z": heatmap2_z, "x": pop_labels, "y": budget_labels})
 
 today_label = date.today().strftime("%b %Y")
 
@@ -242,6 +329,7 @@ body {{
 .footnote a {{ color: #4A7FD4; text-decoration: none; font-weight: 500; }}
 .footnote a:hover {{ text-decoration: underline; }}
 </style>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 </head>
 <body>
 
@@ -290,6 +378,22 @@ body {{
   </div>
 </div>
 
+<div class="section-header" style="margin-top:24px">
+  <div class="section-title">Budget is directly associated with popularity, but not to vote average</div>
+  <div class="section-sub">Popularity increases with budget, but high budget movies tend to have higher mid-range vote averages</div>
+</div>
+<div style="background:#F5F5FA;border-radius:20px;padding:22px 24px;border:0.5px solid rgba(0,0,0,0.06)">
+  <div id="heatmap" style="width:100%;height:400px"></div>
+</div>
+
+<div class="section-header" style="margin-top:24px">
+  <div class="section-title">Vote average is inversely related to budget and popularity</div>
+  <div class="section-sub">Vote average tends to decrease as budget and popularity increase</div>
+</div>
+<div style="background:#F5F5FA;border-radius:20px;padding:22px 24px;border:0.5px solid rgba(0,0,0,0.06)">
+  <div id="heatmap2" style="width:100%;height:400px"></div>
+</div>
+
 <div class="footnote">
   Made by <a href="https://www.linkedin.com/in/patricians" target="_blank" rel="noopener">pattyrocks</a> &#x1F469;&#x1F3FD;&#x200D;&#x1F4BB;
 </div>
@@ -299,8 +403,56 @@ function setNav(el) {{
   document.querySelectorAll('.nav-pill').forEach(p => p.classList.remove('active'));
   el.classList.add('active');
 }}
+
+var hdata = {heatmap_json};
+Plotly.newPlot('heatmap', [{{
+  z: hdata.z,
+  x: hdata.x,
+  y: hdata.y,
+  type: 'heatmap',
+  colorscale: [[0, '#EEEEF3'], [0.5, '#4A7FD4'], [1, '#1a1a2e']],
+  hoverongaps: false,
+  hovertemplate: 'Popularity: %{{x}}<br>Vote Avg: %{{y}}<br>Avg Budget: $%{{z}}M (log\u2081\u2080)<extra></extra>',
+  colorbar: {{
+    title: {{text: 'Budget', font: {{size: 12}}}},
+    tickvals: [4, 5, 6, 7, 8],
+    ticktext: ['$10K', '$100K', '$1M', '$10M', '$100M'],
+    thickness: 12,
+    len: 0.8
+  }}
+}}], {{
+  xaxis: {{title: {{text: 'Popularity', font: {{size: 13}}}}, tickfont: {{size: 11}}}},
+  yaxis: {{title: {{text: 'Vote Average', font: {{size: 13}}}}, tickfont: {{size: 11}}}},
+  paper_bgcolor: 'transparent',
+  plot_bgcolor: 'transparent',
+  margin: {{t: 10, b: 50, l: 60, r: 80}},
+  font: {{family: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", color: '#1a1a2e'}}
+}}, {{responsive: true, displayModeBar: false}});
+
+var hdata2 = {heatmap2_json};
+Plotly.newPlot('heatmap2', [{{
+  z: hdata2.z,
+  x: hdata2.x,
+  y: hdata2.y,
+  type: 'heatmap',
+  colorscale: [[0, '#EEEEF3'], [0.5, '#e8a838'], [1, '#c0392b']],
+  hoverongaps: false,
+  hovertemplate: 'Popularity: %{{x}}<br>Budget: %{{y}}<br>Avg Vote: %{{z:.1f}}<extra></extra>',
+  colorbar: {{
+    title: {{text: 'Avg Vote', font: {{size: 12}}}},
+    thickness: 12,
+    len: 0.8
+  }}
+}}], {{
+  xaxis: {{title: {{text: 'Popularity', font: {{size: 13}}}}, tickfont: {{size: 11}}}},
+  yaxis: {{title: {{text: 'Budget', font: {{size: 13}}}}, tickfont: {{size: 11}}}},
+  paper_bgcolor: 'transparent',
+  plot_bgcolor: 'transparent',
+  margin: {{t: 10, b: 50, l: 100, r: 80}},
+  font: {{family: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", color: '#1a1a2e'}}
+}}, {{responsive: true, displayModeBar: false}});
 </script>
 </body>
 </html>"""
 
-components.html(html, height=900, scrolling=False)
+components.html(html, height=1900, scrolling=False)
