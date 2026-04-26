@@ -66,13 +66,16 @@ def load_data(token: str) -> dict:
 
         heatmap_raw = con.execute("""
             select
-              popularity, vote_average, budget
+              popularity, vote_average, budget, revenue
             from movies
-            where budget > 0 and popularity > 0 and vote_average > 0 and vote_count > 0
+            where budget > 0 and revenue > 0 and popularity > 0 and vote_average > 0 and vote_count >= 100
             and adult = false and EXTRACT(YEAR FROM release_date) <= EXTRACT(YEAR FROM current_date())
             and budget between
               (select percentile_cont(0.01) within group (order by budget) from movies where budget > 0 and adult = false)
               and (select percentile_cont(0.99) within group (order by budget) from movies where budget > 0 and adult = false)
+            and revenue between
+              (select percentile_cont(0.01) within group (order by revenue) from movies where revenue > 0 and adult = false)
+              and (select percentile_cont(0.99) within group (order by revenue) from movies where revenue > 0 and adult = false)
             and popularity between
               (select percentile_cont(0.01) within group (order by popularity) from movies where popularity > 0 and adult = false)
               and (select percentile_cont(0.99) within group (order by popularity) from movies where popularity > 0 and adult = false)
@@ -157,8 +160,8 @@ for yr in sorted_years:
         f'<div class="top5-list">{rows}</div></div>'
     )
 
-# --- heatmap binning (quantile-based) ---
-pops = sorted([p for p, v, b in data["heatmap"]])
+# --- heatmap binning (quantile-based, shared sample) ---
+pops = sorted([p for p, v, b, r in data["heatmap"]])
 n_bins = 8
 quantile_edges = [pops[int(len(pops) * i / n_bins)] for i in range(n_bins)] + [float('inf')]
 
@@ -169,7 +172,7 @@ pop_labels = [f'{fmt_edge(quantile_edges[i])}-{fmt_edge(quantile_edges[i+1])}' i
 vote_labels = [str(i) for i in range(1, 11)]
 
 hm_acc = {}
-for pop, vote, budget in data["heatmap"]:
+for pop, vote, budget, revenue in data["heatmap"]:
     pi = next((i for i in range(len(quantile_edges) - 1) if quantile_edges[i] <= pop < quantile_edges[i + 1]), n_bins - 1)
     vi = max(0, min(int(round(vote)) - 1, 9))
     key = (vi, pi)
@@ -189,7 +192,7 @@ for vi in range(len(vote_labels)):
 heatmap_json = json.dumps({"z": heatmap_z, "x": pop_labels, "y": vote_labels})
 
 # --- heatmap 2: vote_average as color, budget on Y, popularity on X ---
-budgets = sorted([b for p, v, b in data["heatmap"]])
+budgets = sorted([b for p, v, b, r in data["heatmap"]])
 budget_edges = [budgets[int(len(budgets) * i / n_bins)] for i in range(n_bins)] + [float('inf')]
 
 def fmt_budget_edge(v):
@@ -202,7 +205,7 @@ def fmt_budget_edge(v):
 budget_labels = [f'{fmt_budget_edge(budget_edges[i])}-{fmt_budget_edge(budget_edges[i+1])}' if budget_edges[i+1] != float('inf') else f'{fmt_budget_edge(budget_edges[i])}+' for i in range(n_bins)]
 
 hm2_acc = {}
-for pop, vote, budget in data["heatmap"]:
+for pop, vote, budget, revenue in data["heatmap"]:
     pi = next((i for i in range(len(quantile_edges) - 1) if quantile_edges[i] <= pop < quantile_edges[i + 1]), n_bins - 1)
     bi = next((i for i in range(len(budget_edges) - 1) if budget_edges[i] <= budget < budget_edges[i + 1]), n_bins - 1)
     key = (bi, pi)
@@ -220,6 +223,30 @@ for bi in range(len(budget_labels)):
     heatmap2_z.append(row)
 
 heatmap2_json = json.dumps({"z": heatmap2_z, "x": pop_labels, "y": budget_labels})
+
+# --- heatmap 3: revenue heatmap (vote_average Y, popularity X, log10(revenue) color) ---
+hm3_acc = {}
+for pop, vote, budget, revenue in data["heatmap"]:
+    pi = next((i for i in range(len(quantile_edges) - 1) if quantile_edges[i] <= pop < quantile_edges[i + 1]), n_bins - 1)
+    vi = max(0, min(int(round(vote)) - 1, 9))
+    key = (vi, pi)
+    if key not in hm3_acc:
+        hm3_acc[key] = [0, 0]
+    hm3_acc[key][0] += math.log10(revenue) if revenue > 0 else 0
+    hm3_acc[key][1] += 1
+
+heatmap3_z = []
+for vi in range(len(vote_labels)):
+    row = []
+    for pi in range(len(pop_labels)):
+        s = hm3_acc.get((vi, pi))
+        row.append(round(s[0] / s[1], 2) if s else None)
+    heatmap3_z.append(row)
+
+heatmap3_json = json.dumps({"z": heatmap3_z, "x": pop_labels, "y": vote_labels})
+hm3_flat = [v for row in heatmap3_z for v in row if v is not None]
+hm3_zmin = min(hm3_flat) if hm3_flat else 4
+hm3_zmax = max(hm3_flat) if hm3_flat else 9
 
 today_label = date.today().strftime("%b %Y")
 
@@ -387,11 +414,18 @@ body {{
 </div>
 
 <div class="section-header" style="margin-top:24px">
-  <div class="section-title">Vote average is inversely related to budget and popularity</div>
-  <div class="section-sub">Vote average tends to decrease as budget and popularity increase</div>
+  <div class="section-title">Vote average is higher for low budget movies, but increases with popularity</div>
 </div>
 <div style="background:#F5F5FA;border-radius:20px;padding:22px 24px;border:0.5px solid rgba(0,0,0,0.06)">
   <div id="heatmap2" style="width:100%;height:400px"></div>
+</div>
+
+<div class="section-header" style="margin-top:24px">
+  <div class="section-title">Revenue grows with popularity, but vote average shows weak relation to revenue</div>
+  <div class="section-sub">Revenue is also high for high vote average movies, but so is the case for low vote average movies</div>
+</div>
+<div style="background:#F5F5FA;border-radius:20px;padding:22px 24px;border:0.5px solid rgba(0,0,0,0.06)">
+  <div id="heatmap3" style="width:100%;height:400px"></div>
 </div>
 
 <div class="footnote">
@@ -451,8 +485,35 @@ Plotly.newPlot('heatmap2', [{{
   margin: {{t: 10, b: 50, l: 100, r: 80}},
   font: {{family: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", color: '#1a1a2e'}}
 }}, {{responsive: true, displayModeBar: false}});
+
+var hdata3 = {heatmap3_json};
+var zmin3 = {hm3_zmin};
+var zmax3 = {hm3_zmax};
+Plotly.newPlot('heatmap3', [{{
+  z: hdata3.z,
+  x: hdata3.x,
+  y: hdata3.y,
+  type: 'heatmap',
+  zmin: zmin3,
+  zmax: zmax3,
+  colorscale: [[0, '#e8f5e9'], [0.25, '#81c784'], [0.5, '#27ae60'], [0.75, '#1b7a3d'], [1, '#0d3318']],
+  hoverongaps: false,
+  hovertemplate: 'Popularity: %{{x}}<br>Vote Avg: %{{y}}<br>Avg Revenue: $%{{z}}M (log\u2081\u2080)<extra></extra>',
+  colorbar: {{
+    title: {{text: 'Revenue', font: {{size: 12}}}},
+    thickness: 12,
+    len: 0.8
+  }}
+}}], {{
+  xaxis: {{title: {{text: 'Popularity', font: {{size: 13}}}}, tickfont: {{size: 11}}}},
+  yaxis: {{title: {{text: 'Vote Average', font: {{size: 13}}}}, tickfont: {{size: 11}}}},
+  paper_bgcolor: 'transparent',
+  plot_bgcolor: 'transparent',
+  margin: {{t: 10, b: 50, l: 60, r: 80}},
+  font: {{family: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", color: '#1a1a2e'}}
+}}, {{responsive: true, displayModeBar: false}});
 </script>
 </body>
 </html>"""
 
-components.html(html, height=1900, scrolling=False)
+components.html(html, height=2400, scrolling=False)
